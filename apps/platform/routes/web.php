@@ -1,0 +1,174 @@
+<?php
+
+use App\Http\Controllers\Web\AdminPanelController;
+use App\Models\Permission;
+use App\Models\Role;
+use App\Models\Tenant;
+use App\Models\TenantOnboardingInvite;
+use App\Models\User;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Route;
+use Illuminate\Validation\Rules\Password;
+
+Route::get('/', function () {
+    if (Auth::check()) {
+        return redirect('/dashboard');
+    }
+
+    return view('welcome');
+});
+
+Route::get('/login', function () {
+    return view('auth.login');
+})->name('login');
+
+Route::post('/login', function (Request $request) {
+    $data = $request->validate([
+        'login' => ['required', 'string', 'max:255'],
+        'password' => ['required', 'string'],
+    ]);
+    $login = trim($data['login']);
+    $phone = preg_replace('/\D+/', '', $login);
+    $user = User::query()
+        ->where(function ($query) use ($login, $phone): void {
+            $query->where('email', $login);
+            $query->orWhere('app_username', $login);
+            if ($phone !== '') {
+                $query->orWhere('phone', $phone);
+            }
+        })
+        ->where('is_active', true)
+        ->first();
+
+    if (! $user || ! Hash::check($data['password'], $user->password)) {
+        return back()->withErrors(['login' => 'Invalid login details.'])->withInput();
+    }
+
+    if ($user->app_only) {
+        return back()->withErrors(['login' => 'This is an app-only login. Use it in the Punit ERP app.'])->withInput();
+    }
+
+    Auth::login($user, true);
+    $request->session()->regenerate();
+
+    return redirect()->intended('/dashboard');
+})->name('login.store');
+
+Route::post('/logout', function (Request $request) {
+    Auth::logout();
+    $request->session()->invalidate();
+    $request->session()->regenerateToken();
+
+    return redirect()->route('login');
+})->name('logout');
+
+Route::get('/onboarding', fn () => view('auth.onboarding'))->name('onboarding.start');
+Route::post('/onboarding', function (Request $request) {
+    $data = $request->validate([
+        'phone' => ['required', 'string', 'max:32'],
+        'company_name' => ['required', 'string', 'max:255'],
+        'name' => ['required', 'string', 'max:255'],
+        'email' => ['required', 'email', 'max:255', 'unique:users,email'],
+        'password' => ['required', 'confirmed', Password::min(8)],
+    ]);
+    $phone = preg_replace('/\D+/', '', $data['phone']);
+    $invite = TenantOnboardingInvite::query()
+        ->where('phone', $phone)
+        ->where('status', 'pending')
+        ->latest()
+        ->first();
+
+    if (! $invite || ! $invite->isClaimable()) {
+        return back()->withErrors(['phone' => 'This phone number is not approved for onboarding or has expired.'])->withInput();
+    }
+
+    $user = DB::transaction(function () use ($data, $phone, $invite) {
+        $tenant = Tenant::query()->create([
+            'name' => $data['company_name'],
+            'code' => 'TEN-'.strtoupper(str()->random(8)),
+            'status' => 'active',
+            'settings' => [
+                'adminLimit' => $invite->admin_limit,
+                'reportFooter' => [
+                    'Solution fully built inhouse by engineers of Punit Instrument Pvt Ltd and Punit Technologies using patented tech | 30 years of R & D | proudly 100% made in India',
+                    'For software training support contact us 9737599004',
+                ],
+            ],
+        ]);
+        $role = Role::query()->firstOrCreate(
+            ['tenant_id' => $tenant->id, 'key' => 'company-admin'],
+            ['name' => 'Company Admin', 'is_system' => true],
+        );
+        $role->permissions()->syncWithoutDetaching(Permission::query()->pluck('id'));
+        $user = User::query()->create([
+            'tenant_id' => $tenant->id,
+            'name' => $data['name'],
+            'email' => $data['email'],
+            'phone' => $phone,
+            'password' => Hash::make($data['password']),
+            'is_active' => true,
+        ]);
+        $user->roles()->syncWithoutDetaching([$role->id]);
+        $invite->update([
+            'tenant_id' => $tenant->id,
+            'status' => 'claimed',
+            'claimed_by' => $user->id,
+            'claimed_at' => now(),
+        ]);
+
+        return $user;
+    });
+
+    Auth::login($user, true);
+    $request->session()->regenerate();
+
+    return redirect()->route('admin.tenant-settings')->with('status', 'Company admin created. Add report details and logo here.');
+})->name('onboarding.store');
+
+Route::middleware('auth')->group(function (): void {
+    Route::get('/dashboard', [AdminPanelController::class, 'dashboard'])->name('admin.dashboard');
+    Route::get('/production', [AdminPanelController::class, 'production'])->name('admin.production');
+    Route::post('/production', [AdminPanelController::class, 'productionCreate'])->name('admin.production.create');
+    Route::get('/production/{production}', [AdminPanelController::class, 'productionShow'])->name('admin.production.show');
+    Route::post('/production/{production}/cancel', [AdminPanelController::class, 'productionCancel'])->name('admin.production.cancel');
+    Route::get('/inventory', [AdminPanelController::class, 'inventory'])->name('admin.inventory');
+    Route::post('/inventory/adjust', [AdminPanelController::class, 'inventoryAdjust'])->name('admin.inventory.adjust');
+    Route::delete('/inventory/clear', [AdminPanelController::class, 'inventoryClear'])->name('admin.inventory.clear');
+    Route::get('/customers', [AdminPanelController::class, 'customers'])->name('admin.customers');
+    Route::post('/customers/{customer?}', [AdminPanelController::class, 'customerSave'])->name('admin.customers.save');
+    Route::delete('/customers/{customer}', [AdminPanelController::class, 'customerDelete'])->name('admin.customers.delete');
+    Route::get('/dispatch', [AdminPanelController::class, 'dispatches'])->name('admin.dispatch');
+    Route::post('/dispatch', [AdminPanelController::class, 'dispatchCreate'])->name('admin.dispatch.create');
+    Route::post('/dispatch/{dispatch}/reverse', [AdminPanelController::class, 'dispatchReverse'])->name('admin.dispatch.reverse');
+    Route::delete('/dispatch/{dispatch}/items/{item}', [AdminPanelController::class, 'dispatchItemDelete'])->name('admin.dispatch.items.delete');
+    Route::get('/inward-report', [AdminPanelController::class, 'inwardReport'])->name('admin.inward-report');
+    Route::get('/dispatch-report', [AdminPanelController::class, 'dispatchReport'])->name('admin.dispatch-report');
+    Route::get('/reports/{report?}', [AdminPanelController::class, 'reports'])->name('admin.reports');
+    Route::get('/exports/{report}/{format}', [AdminPanelController::class, 'export'])->name('admin.exports');
+    Route::get('/inward/{session}/export/{format}', [AdminPanelController::class, 'inwardExport'])->name('admin.inward.export');
+    Route::get('/dispatch/{dispatch}/export/{format}', [AdminPanelController::class, 'dispatchExport'])->name('admin.dispatch.export');
+    Route::get('/sync-status', [AdminPanelController::class, 'sync'])->name('admin.sync');
+    Route::get('/audit-logs', [AdminPanelController::class, 'auditLogs'])->name('admin.audit');
+    Route::get('/tenant-settings', [AdminPanelController::class, 'tenantSettings'])->name('admin.tenant-settings');
+    Route::post('/tenant-settings', [AdminPanelController::class, 'tenantSettingsSave'])->name('admin.tenant-settings.save');
+    Route::get('/app-users', [AdminPanelController::class, 'appUsers'])->name('admin.app-users');
+    Route::post('/app-users', [AdminPanelController::class, 'appUserStore'])->name('admin.app-users.store');
+    Route::patch('/app-users/{user}/status', [AdminPanelController::class, 'appUserStatus'])->name('admin.app-users.status');
+    Route::delete('/admin/users/{user}', [AdminPanelController::class, 'userDestroy'])->name('admin.users.destroy');
+    Route::get('/superadmin/onboarding', [AdminPanelController::class, 'superAdminOnboarding'])->name('admin.superadmin.onboarding');
+    Route::post('/superadmin/onboarding', [AdminPanelController::class, 'superAdminOnboardingSave'])->name('admin.superadmin.onboarding.save');
+    Route::get('/admin/{section}', [AdminPanelController::class, 'resource'])->name('admin.resource');
+
+    Route::get('/products', function () {
+        return view('products.index', ['title' => 'Products']);
+    })->name('admin.products');
+
+    Route::get('/product-details', function () {
+        return view('product-details.index', ['title' => 'Product Details']);
+    })->name('admin.product-details');
+
+    Route::get('/labels/{template?}', fn () => redirect()->route('admin.tenant-settings'))->name('admin.labels');
+});

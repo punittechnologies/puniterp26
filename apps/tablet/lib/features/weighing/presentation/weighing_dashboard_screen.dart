@@ -1,0 +1,2224 @@
+import 'dart:async';
+import 'dart:convert' show latin1;
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../../core/api/api_session.dart';
+import '../../../core/database/local_database.dart';
+import '../../../services/devices/android_bluetooth_settings.dart';
+import '../../../services/devices/bluetooth_thermal_printer_adapter.dart';
+import '../../../services/devices/printer_adapter.dart';
+import '../../../services/sync/sync_queue_service.dart';
+import '../../inventory/data/inventory_repository.dart';
+import '../../labels/data/label_template_repository.dart';
+import '../../labels/domain/label_template_models.dart';
+import '../../products/data/product_repository.dart';
+import '../../products/domain/product_models.dart';
+import '../data/production_repository.dart';
+import '../data/scale_adapters.dart';
+import '../domain/scale_models.dart';
+import '../domain/weighing_logic.dart';
+
+class WeighingDashboardScreen extends StatefulWidget {
+  const WeighingDashboardScreen({super.key});
+
+  @override
+  State<WeighingDashboardScreen> createState() =>
+      _WeighingDashboardScreenState();
+}
+
+class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
+  late final LocalDatabase database;
+  late final ProductRepository productRepository;
+  late ProductionRepository productionRepository;
+  late final InventoryRepository inventoryRepository;
+  late final LabelTemplateRepository labelRepository;
+  late final BluetoothThermalPrinterAdapter printerAdapter;
+  late final AndroidBluetoothSettings bluetoothSettings;
+  late SyncQueueService syncQueueService;
+  late ScaleAdapter scale;
+  late final ScaleConnectionManager scaleManager;
+  late final WeighingController controller;
+  late final WeighingSession session;
+  StreamSubscription<ScaleReading>? subscription;
+  StreamSubscription<ScaleConnectionStatus>? statusSubscription;
+
+  List<ProductConfig> products = [];
+  List<DynamicFieldConfig> fields = [];
+  ProductConfig? selectedProduct;
+  ProductVariantConfig? selectedVariant;
+  ScaleReading reading = ScaleReading(
+    grossWeight: 0,
+    unit: 'kg',
+    isStable: true,
+    raw: 'SIM',
+    recordedAt: DateTime.now(),
+  );
+  WeightComputation? computation;
+  LabelTemplateConfig? labelTemplate;
+  LocalInwardSession? activeInwardSession;
+  List<LocalProductionTransaction> recentProductions = [];
+  int pendingSync = 0;
+  double currentInventory = 0;
+  String? lastSavedSerial;
+  String? lastSavedBarcode;
+  bool autoCapture = false;
+  double? manualTare;
+  ScaleConnectionStatus scaleStatus = ScaleConnectionStatus.disconnected;
+  PrinterConnectionStatus printerStatus = PrinterConnectionStatus.disconnected;
+  ScaleDevice? configuredScale;
+  PrinterDevice? configuredPrinter;
+  String printerMessage = 'Printer not connected';
+  String scaleMessage = 'Scale not connected';
+  bool usingSimulator = false;
+  final Map<String, TextEditingController> fieldControllers = {};
+  final Map<String, String> dynamicValues = {};
+  final TextEditingController manualTareController = TextEditingController();
+  static const _deletePasswordKey = 'weighing.delete_password';
+
+  static const scaleProfiles = [
+    ScaleParsingProfile(
+      id: 'comma-st-gs',
+      name: 'Comma ST/US + weight + unit',
+      exampleRaw: 'ST,GS,+0012.340kg\n',
+      stableTokens: ['ST'],
+      unstableTokens: ['US'],
+    ),
+    ScaleParsingProfile(
+      id: 'fixed-a12',
+      name: 'Fixed length serial A&D style',
+      fixedLength: 17,
+      weightStart: 3,
+      weightLength: 9,
+      decimalPlaces: 3,
+      stableTokens: ['ST'],
+      unstableTokens: ['US'],
+      exampleRaw: 'ST,+00012340kg\r\n',
+    ),
+    ScaleParsingProfile(
+      id: 'regex-weight',
+      name: 'Regex first numeric weight',
+      regex: r'([+-]?\d+(?:\.\d+)?)',
+      exampleRaw: 'S +12.340 kg\n',
+      stableTokens: ['S'],
+      unstableTokens: ['U'],
+    ),
+  ];
+
+  bool get _scaleConnected =>
+      scaleStatus == ScaleConnectionStatus.receiving ||
+      scaleStatus == ScaleConnectionStatus.connected;
+
+  @override
+  void initState() {
+    super.initState();
+    database = LocalDatabase();
+    productRepository = ProductRepository(database: database);
+    productionRepository = ProductionRepository(database: database);
+    inventoryRepository = InventoryRepository(database);
+    labelRepository = LabelTemplateRepository(database: database);
+    printerAdapter = BluetoothThermalPrinterAdapter();
+    bluetoothSettings = const AndroidBluetoothSettings();
+    syncQueueService = SyncQueueService(database);
+    scaleManager = ScaleConnectionManager(
+      transport: ClassicSppTransport(),
+      profile: scaleProfiles.first,
+    );
+    scale = SimulatedScaleAdapter();
+    controller = WeighingController(
+      ruleResolver: WeightRuleResolver(),
+      conversionCalculator: const UnitConversionCalculator(),
+    );
+    session = WeighingSession();
+    _load();
+    _connectScale();
+    _loadPrinter();
+  }
+
+  @override
+  void dispose() {
+    subscription?.cancel();
+    statusSubscription?.cancel();
+    for (final controller in fieldControllers.values) {
+      controller.dispose();
+    }
+    manualTareController.dispose();
+    scale.disconnect();
+    super.dispose();
+  }
+
+  Future<void> _connectScale() async {
+    await subscription?.cancel();
+    await statusSubscription?.cancel();
+    await scale.disconnect();
+
+    final savedDevice = await scaleManager.savedDevice();
+    final savedProfile = await scaleManager.savedProfile();
+    configuredScale = savedDevice;
+
+    if (savedDevice == null) {
+      final simulated = SimulatedScaleAdapter();
+      scale = simulated;
+      usingSimulator = true;
+      await simulated.connect();
+      scaleStatus = simulated.status;
+      scaleMessage = 'Demo scale active. Tap Connect Scale for real hardware.';
+      subscription = simulated.readings.listen(_onReading);
+      if (mounted) setState(() {});
+      return;
+    }
+
+    final bluetooth = BluetoothScaleAdapter(
+      transport: ClassicSppTransport(),
+      profile: savedProfile,
+      deviceId: savedDevice.id,
+    );
+    scale = bluetooth;
+    usingSimulator = false;
+    statusSubscription = bluetooth.statusStream.listen((status) {
+      if (mounted) setState(() => scaleStatus = status);
+    });
+    subscription = bluetooth.readings.listen(_onReading);
+    try {
+      await bluetooth.connect();
+      if (mounted) {
+        setState(() {
+          scaleStatus = bluetooth.status;
+          scaleMessage = 'Connected to ${savedDevice.name}';
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          scaleStatus = ScaleConnectionStatus.error;
+          scaleMessage = 'Scale connection failed: $error';
+        });
+      }
+    }
+  }
+
+  Future<void> _load() async {
+    final client = await ApiSession.client();
+    syncQueueService = SyncQueueService(database, apiClient: client);
+    productionRepository = ProductionRepository(
+      database: database,
+      apiClient: client,
+    );
+    if (client != null) {
+      final deviceId = await ApiSession.deviceId();
+      await ProductRepository(
+        database: database,
+        apiClient: client,
+      ).sync(deviceId: deviceId);
+      await LabelTemplateRepository(
+        database: database,
+        apiClient: client,
+      ).sync();
+      await syncQueueService.retryPending(passes: 4);
+    }
+    final loadedProducts = await productRepository.cachedProducts();
+    final loadedFields = await _weighingFields();
+    final pending = await syncQueueService.pendingCount();
+    setState(() {
+      products = loadedProducts;
+      fields = loadedFields;
+      pendingSync = pending;
+      selectedProduct = loadedProducts.firstOrNull;
+      selectedVariant = null;
+    });
+    await _refreshDerived();
+  }
+
+  Future<List<DynamicFieldConfig>> _weighingFields() async {
+    final productFields = await productRepository.cachedFields(
+      entityType: 'product',
+    );
+    final variantFields = await productRepository.cachedFields(
+      entityType: 'product_variant',
+    );
+    final byKey = <String, DynamicFieldConfig>{};
+    for (final field in [...productFields, ...variantFields]) {
+      byKey.putIfAbsent(field.internalKey, () => field);
+    }
+    return byKey.values.toList()
+      ..sort((a, b) => a.fieldLabel.compareTo(b.fieldLabel));
+  }
+
+  Future<void> _loadPrinter() async {
+    final saved = await printerAdapter.savedPrinter();
+    final connected = await printerAdapter.isConnected();
+    if (!mounted) return;
+    setState(() {
+      configuredPrinter = saved;
+      printerStatus = connected
+          ? PrinterConnectionStatus.connected
+          : PrinterConnectionStatus.disconnected;
+      printerMessage = saved == null
+          ? 'Configure printer first'
+          : connected
+          ? 'Connected to ${saved.name}'
+          : 'Saved printer: ${saved.name}';
+    });
+  }
+
+  Future<bool> _requestBluetoothPermissions() async {
+    final connect = await Permission.bluetoothConnect.request();
+    final scan = await Permission.bluetoothScan.request();
+    if (connect.isPermanentlyDenied || scan.isPermanentlyDenied) {
+      await openAppSettings();
+    }
+    return connect.isGranted && scan.isGranted;
+  }
+
+  Future<void> _showScaleConnector() async {
+    final granted = await _requestBluetoothPermissions();
+    if (!granted && mounted) {
+      setState(() => scaleMessage = 'Bluetooth permission required.');
+      return;
+    }
+
+    final transport = ClassicSppTransport();
+    var devices = <ScaleDevice>[];
+    var selectedDevice = configuredScale ?? await scaleManager.savedDevice();
+    var selectedProfile = await scaleManager.savedProfile();
+    var busy = false;
+    var loaded = false;
+    var message = scaleMessage;
+
+    Future<void> refresh(StateSetter sheetSetState) async {
+      sheetSetState(() {
+        busy = true;
+        loaded = true;
+        message = 'Loading paired Bluetooth scales...';
+      });
+      try {
+        final list = await transport.pairedDevices();
+        sheetSetState(() {
+          devices = list;
+          if (selectedDevice != null && !devices.contains(selectedDevice)) {
+            selectedDevice = null;
+          }
+          message = list.isEmpty
+              ? 'No paired scales found. Pair the scale in Android Bluetooth settings first.'
+              : 'Select your scale and tap Connect.';
+        });
+      } catch (error) {
+        sheetSetState(() => message = 'Could not list scales: $error');
+      } finally {
+        sheetSetState(() => busy = false);
+      }
+    }
+
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, sheetSetState) {
+          if (!loaded && !busy) {
+            Future.microtask(() => refresh(sheetSetState));
+          }
+          return Padding(
+            padding: EdgeInsets.fromLTRB(
+              18,
+              6,
+              18,
+              18 + MediaQuery.of(context).viewInsets.bottom,
+            ),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 560),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Connect Weighing Scale',
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    message,
+                    style: const TextStyle(color: Color(0xFF536685)),
+                  ),
+                  const SizedBox(height: 18),
+                  DropdownButtonFormField<ScaleDevice>(
+                    initialValue: devices.contains(selectedDevice)
+                        ? selectedDevice
+                        : null,
+                    decoration: const InputDecoration(
+                      labelText: 'Paired Classic Bluetooth scale',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: devices
+                        .map(
+                          (device) => DropdownMenuItem(
+                            value: device,
+                            child: Text(
+                              '${device.name}  ${device.address ?? device.id}',
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (device) =>
+                        sheetSetState(() => selectedDevice = device),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<ScaleParsingProfile>(
+                    initialValue: scaleProfiles.contains(selectedProfile)
+                        ? selectedProfile
+                        : scaleProfiles.first,
+                    decoration: const InputDecoration(
+                      labelText: 'Parsing profile',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: scaleProfiles
+                        .map(
+                          (profile) => DropdownMenuItem(
+                            value: profile,
+                            child: Text(profile.name),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (profile) => sheetSetState(
+                      () => selectedProfile = profile ?? scaleProfiles.first,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => bluetoothSettings.open(),
+                          icon: const Icon(Icons.bluetooth_searching_rounded),
+                          label: const Text('Pair Device'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: busy ? null : () => refresh(sheetSetState),
+                          icon: const Icon(Icons.refresh_rounded),
+                          label: const Text('Refresh'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: busy || selectedDevice == null
+                              ? null
+                              : () async {
+                                  final device = selectedDevice!;
+                                  sheetSetState(() {
+                                    busy = true;
+                                    message = 'Connecting to ${device.name}...';
+                                  });
+                                  await scaleManager.save(
+                                    device: device,
+                                    profile: selectedProfile,
+                                    autoReconnect: true,
+                                  );
+                                  setState(() {
+                                    configuredScale = device;
+                                    scaleMessage =
+                                        'Connecting to ${device.name}...';
+                                  });
+                                  await _connectScale();
+                                  if (context.mounted) {
+                                    Navigator.of(context).pop();
+                                  }
+                                },
+                          icon: const Icon(Icons.sensors_rounded),
+                          label: const Text('Connect'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  TextButton(
+                    onPressed: () => context.go('/settings'),
+                    child: const Text('Open full diagnostics'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+    await transport.disconnect();
+  }
+
+  Future<void> _showPrinterConnector() async {
+    final granted = await _requestBluetoothPermissions();
+    if (!granted && mounted) {
+      setState(() => printerMessage = 'Bluetooth permission required.');
+      return;
+    }
+
+    var printers = <PrinterDevice>[];
+    var selectedPrinter =
+        configuredPrinter ?? await printerAdapter.savedPrinter();
+    var busy = false;
+    var loaded = false;
+    var message = printerMessage;
+
+    Future<void> refresh(StateSetter sheetSetState) async {
+      sheetSetState(() {
+        busy = true;
+        loaded = true;
+        message =
+            'Scanning BLE printers and listing TVS Native paired printers...';
+      });
+      try {
+        final list = await printerAdapter.discover();
+        sheetSetState(() {
+          printers = list;
+          if (selectedPrinter != null && !printers.contains(selectedPrinter)) {
+            selectedPrinter = null;
+          }
+          message = list.isEmpty
+              ? 'No printers found. For TVS Native, pair the printer in Android Bluetooth settings first.'
+              : 'Select BLE TSPL or TVS Native, then tap Connect.';
+        });
+      } catch (error) {
+        sheetSetState(() => message = 'Could not list printers: $error');
+      } finally {
+        sheetSetState(() => busy = false);
+      }
+    }
+
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, sheetSetState) {
+          if (!loaded && !busy) {
+            Future.microtask(() => refresh(sheetSetState));
+          }
+          return Padding(
+            padding: EdgeInsets.fromLTRB(
+              18,
+              6,
+              18,
+              18 + MediaQuery.of(context).viewInsets.bottom,
+            ),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 560),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Connect Label Printer',
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    message,
+                    style: const TextStyle(color: Color(0xFF536685)),
+                  ),
+                  const SizedBox(height: 18),
+                  DropdownButtonFormField<PrinterDevice>(
+                    initialValue: printers.contains(selectedPrinter)
+                        ? selectedPrinter
+                        : null,
+                    decoration: const InputDecoration(
+                      labelText: 'Printer connection',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: printers
+                        .map(
+                          (printer) => DropdownMenuItem(
+                            value: printer,
+                            child: Text(
+                              '${printer.name}  ${printer.address ?? printer.id}',
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (printer) =>
+                        sheetSetState(() => selectedPrinter = printer),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => bluetoothSettings.open(),
+                          icon: const Icon(Icons.bluetooth_searching_rounded),
+                          label: const Text('Bluetooth Settings'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: busy ? null : () => refresh(sheetSetState),
+                          icon: const Icon(Icons.refresh_rounded),
+                          label: const Text('Refresh'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: busy || selectedPrinter == null
+                              ? null
+                              : () async {
+                                  final printer = selectedPrinter!;
+                                  sheetSetState(() {
+                                    busy = true;
+                                    message =
+                                        'Connecting to ${printer.name}...';
+                                  });
+                                  try {
+                                    await printerAdapter.connect(printer.id);
+                                    await printerAdapter.savePrinter(printer);
+                                    if (!mounted) return;
+                                    setState(() {
+                                      configuredPrinter = printer;
+                                      printerStatus =
+                                          PrinterConnectionStatus.connected;
+                                      printerMessage =
+                                          'Connected to ${printer.name}';
+                                    });
+                                    if (context.mounted) {
+                                      Navigator.of(context).pop();
+                                    }
+                                  } catch (error) {
+                                    sheetSetState(() {
+                                      busy = false;
+                                      message = 'Connection failed: $error';
+                                    });
+                                  }
+                                },
+                          icon: const Icon(Icons.print_outlined),
+                          label: const Text('Connect'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed:
+                        printerStatus == PrinterConnectionStatus.connected
+                        ? () async {
+                            sheetSetState(() {
+                              busy = true;
+                              message = 'Sending test print...';
+                            });
+                            final result = await printerAdapter.print(
+                              PrintJob(
+                                jobId:
+                                    'test_${DateTime.now().microsecondsSinceEpoch}',
+                                template: const {},
+                                data: {
+                                  'company_name': 'Punit ERP',
+                                  'product_name': 'Printer Test',
+                                  'serial_number': 'TEST',
+                                  'barcode_value': 'TEST123',
+                                  'gross_weight': 12.480,
+                                  'tare_weight': 0.000,
+                                  'net_weight': 12.480,
+                                  'unit': 'kg',
+                                },
+                              ),
+                            );
+                            sheetSetState(() {
+                              busy = false;
+                              message = result.message ?? result.status;
+                            });
+                            if (mounted) {
+                              setState(() {
+                                printerStatus = result.status == 'failed'
+                                    ? PrinterConnectionStatus.error
+                                    : PrinterConnectionStatus.connected;
+                                printerMessage =
+                                    result.message ?? result.status;
+                              });
+                            }
+                          }
+                        : null,
+                    icon: const Icon(Icons.receipt_long_outlined),
+                    label: const Text('Test Print'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _refreshDerived() async {
+    labelTemplate = await labelRepository.effective(
+      productId: selectedProduct?.id,
+      variantId: null,
+    );
+    currentInventory = selectedProduct == null
+        ? 0
+        : await inventoryRepository.productWeight(
+            selectedProduct!.id,
+            variantId: null,
+          );
+    pendingSync = await syncQueueService.pendingCount();
+    activeInwardSession = await productionRepository.openSession();
+    final session = activeInwardSession;
+    recentProductions = session?.status == 'open'
+        ? await productionRepository.bySession(session!.id)
+        : <LocalProductionTransaction>[];
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _onReading(ScaleReading value) async {
+    final computed = controller.compute(
+      reading: value,
+      product: selectedProduct,
+      variant: null,
+      manualTare: manualTare,
+    );
+    final ready = session.update(value, computed);
+    setState(() {
+      reading = value;
+      computation = computed;
+    });
+    if (autoCapture && ready) {
+      await _capture();
+    }
+  }
+
+  Future<LocalProductionTransaction?> _capture() async {
+    final product = selectedProduct;
+    final computed = computation;
+    if (product == null || computed == null) return null;
+    if (reading.grossWeight < 0 || computed.gross <= 0 || computed.net <= 0) {
+      _showCornerMessage(
+        'Negative or zero weight cannot be saved. Remove item, zero scale, then weigh again.',
+        error: true,
+      );
+      return null;
+    }
+    final inwardSession = activeInwardSession;
+    if (inwardSession?.status != 'open') {
+      _showCornerMessage(
+        'Start transaction first, then save and print labels.',
+        error: true,
+      );
+      return null;
+    }
+    final id = await productionRepository.capture(
+      product: product,
+      variant: null,
+      computation: computed,
+      reading: reading,
+      dynamicValues: Map<String, dynamic>.from(dynamicValues),
+      inwardSession: inwardSession,
+    );
+    session.markCaptured(computed.net);
+    final syncResult = await syncQueueService.retryPending(passes: 4);
+    if (syncResult.hasFailures && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Saved locally. Web sync pending: ${syncResult.message}',
+          ),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: const Color(0xFFB42318),
+        ),
+      );
+    }
+    final recent = await productionRepository.recent(limit: 1);
+    final saved = recent.firstOrNull;
+    setState(() {
+      lastSavedSerial = saved?.serialNumber ?? id;
+      lastSavedBarcode = saved?.barcodeValue ?? lastSavedSerial;
+    });
+    await _refreshDerived();
+    return saved;
+  }
+
+  Future<void> _printLabel() async {
+    final product = selectedProduct;
+    final computed = computation;
+    if (product == null || computed == null) return;
+    if (reading.grossWeight < 0 || computed.gross <= 0 || computed.net <= 0) {
+      setState(() {
+        printerStatus = PrinterConnectionStatus.connected;
+        printerMessage = 'Print blocked: invalid negative or zero weight.';
+      });
+      _showCornerMessage(
+        'Print blocked: invalid negative or zero weight.',
+        error: true,
+      );
+      return;
+    }
+
+    final printer = configuredPrinter ?? await printerAdapter.savedPrinter();
+    if (printer == null) {
+      if (!mounted) return;
+      setState(() {
+        printerStatus = PrinterConnectionStatus.error;
+        printerMessage = 'Open Printer Settings and connect a printer first.';
+      });
+      return;
+    }
+
+    try {
+      setState(() {
+        configuredPrinter = printer;
+        printerStatus = PrinterConnectionStatus.connecting;
+        printerMessage = 'Connecting to ${printer.name}...';
+      });
+      if (!await printerAdapter.isConnected()) {
+        await printerAdapter.connect(printer.id);
+      }
+      setState(() {
+        printerStatus = PrinterConnectionStatus.printing;
+        printerMessage = 'Sending label...';
+      });
+      final activeTemplate = await labelRepository.effective(
+        productId: product.id,
+        variantId: null,
+      );
+      labelTemplate = activeTemplate;
+      final result = await printerAdapter.print(
+        PrintJob(
+          jobId: 'print_${DateTime.now().microsecondsSinceEpoch}',
+          template: activeTemplate?.templateJson ?? const {},
+          data: {
+            'company_name': 'Punit Weighing',
+            'product_name': product.name,
+            'variant_name': null,
+            'serial_number': lastSavedSerial ?? 'PREVIEW',
+            'barcode_value': lastSavedBarcode ?? lastSavedSerial ?? 'PREVIEW',
+            'gross_weight': computed.gross,
+            'tare_weight': computed.tare,
+            'net_weight': computed.net,
+            'unit': computed.unit,
+            'piece_quantity': computed.roundedPieces,
+            'dynamic_values': Map<String, dynamic>.from(dynamicValues),
+            'product_raw': product.raw,
+          },
+        ),
+      );
+      if (!mounted) return;
+      setState(() {
+        printerStatus = result.status == 'printed'
+            ? PrinterConnectionStatus.connected
+            : PrinterConnectionStatus.error;
+        printerMessage = result.message ?? result.status;
+      });
+      if (result.status == 'printed') {
+        _showPrintSuccess();
+      }
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        printerStatus = PrinterConnectionStatus.error;
+        printerMessage = 'Print failed: $error';
+      });
+    }
+  }
+
+  void _showCornerMessage(String message, {bool error = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        width: 360,
+        backgroundColor: error
+            ? const Color(0xFFB42318)
+            : const Color(0xFF087A4A),
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  Future<void> _deleteRecentEntry(LocalProductionTransaction row) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    var savedPassword = prefs.getString(_deletePasswordKey);
+    final passwordController = TextEditingController();
+    final newPasswordController = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete weighment?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'This removes ${row.barcodeValue} from this open transaction.',
+            ),
+            const SizedBox(height: 12),
+            if (savedPassword == null)
+              TextField(
+                controller: newPasswordController,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'Set delete password',
+                  border: OutlineInputBorder(),
+                ),
+              )
+            else
+              TextField(
+                controller: passwordController,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'Delete password',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    if (savedPassword == null) {
+      final newPassword = newPasswordController.text.trim();
+      if (newPassword.length < 4) {
+        _showCornerMessage('Set at least 4 digits/characters.', error: true);
+        return;
+      }
+      await prefs.setString(_deletePasswordKey, newPassword);
+      savedPassword = newPassword;
+    } else if (passwordController.text.trim() != savedPassword) {
+      _showCornerMessage('Wrong delete password.', error: true);
+      return;
+    }
+
+    final deleted = await productionRepository.deleteEntry(row);
+    if (!deleted) {
+      _showCornerMessage(
+        'This entry is synced. Login/connection is required to delete it from web.',
+        error: true,
+      );
+      return;
+    }
+    await _refreshDerived();
+    _showCornerMessage('Weighment deleted from current transaction.');
+  }
+
+  Future<void> _startInwardSession() async {
+    final session = await productionRepository.startSession();
+    setState(() => activeInwardSession = session);
+    await _refreshDerived();
+  }
+
+  Future<void> _finishInwardSession() async {
+    final session = activeInwardSession;
+    if (session == null) return;
+    final saved = await productionRepository.finishSession(session.id);
+    setState(() {
+      activeInwardSession = saved;
+      recentProductions = [];
+    });
+    final syncResult = await syncQueueService.retryPending(passes: 4);
+    await _refreshDerived();
+    final rows = await productionRepository.bySession(saved.id);
+    final pdf = await _writeInwardPdf(saved, rows);
+    if (syncResult.hasFailures && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Inward report saved locally. Web sync pending: ${syncResult.message}',
+          ),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: const Color(0xFFB42318),
+        ),
+      );
+    }
+    if (mounted) _showInwardSavedDialog(saved, pdf);
+  }
+
+  Future<void> _editTare() async {
+    manualTareController.text = manualTare?.toString() ?? '';
+    final value = await showDialog<double?>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit Tare Weight'),
+        content: TextField(
+          controller: manualTareController,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(
+            labelText: 'Tare kg',
+            hintText: 'Example: 0.800',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(null),
+            child: const Text('Use Product Tare'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(
+              context,
+            ).pop(double.tryParse(manualTareController.text.trim()) ?? 0),
+            child: const Text('Apply'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    setState(() {
+      manualTare = value;
+      computation = controller.compute(
+        reading: reading,
+        product: selectedProduct,
+        variant: null,
+        manualTare: manualTare,
+      );
+    });
+  }
+
+  void _showPrintSuccess() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Label printed: ${lastSavedBarcode ?? '-'}'),
+        behavior: SnackBarBehavior.floating,
+        width: 320,
+        backgroundColor: const Color(0xFF087A4A),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<File> _writeInwardPdf(
+    LocalInwardSession session,
+    List<LocalProductionTransaction> rows,
+  ) async {
+    final directory = await getApplicationDocumentsDirectory();
+    final file = File(p.join(directory.path, '${session.sessionNumber}.pdf'));
+    final lines = <String>[
+      'PUNIT ERP - INWARD REPORT',
+      'Transaction: ${session.sessionNumber}',
+      'Started: ${session.startedAt}',
+      'Ended: ${session.endedAt ?? DateTime.now()}',
+      'Entries: ${rows.length}',
+      'Gross: ${session.totalGrossWeight.toStringAsFixed(3)} kg',
+      'Tare: ${session.totalTareWeight.toStringAsFixed(3)} kg',
+      'Net: ${session.totalNetWeight.toStringAsFixed(3)} kg',
+      '',
+      'SR | BARCODE | PRODUCT | GROSS | TARE | NET | TIME',
+      ...rows.indexed.map((item) {
+        final row = item.$2;
+        return '${item.$1 + 1} | ${row.barcodeValue} | ${row.productId} | '
+            '${row.grossWeight.toStringAsFixed(3)} | '
+            '${row.tareWeight.toStringAsFixed(3)} | '
+            '${row.netWeight.toStringAsFixed(3)} | ${row.capturedAt}';
+      }),
+    ];
+    await file.writeAsBytes(_simplePdf(lines));
+    return file;
+  }
+
+  List<int> _simplePdf(List<String> lines) {
+    final escaped = lines
+        .take(42)
+        .map(
+          (line) => line
+              .replaceAll(r'\', '/')
+              .replaceAll('(', '[')
+              .replaceAll(')', ']'),
+        )
+        .toList();
+    final content = StringBuffer();
+    var y = 800;
+    for (var index = 0; index < escaped.length; index++) {
+      final size = index == 0 ? 14 : 8;
+      content.writeln('BT /F1 $size Tf 28 $y Td (${escaped[index]}) Tj ET');
+      y -= index == 0 ? 24 : 15;
+      if (y < 40) break;
+    }
+    final stream = content.toString();
+    final objects = <String>[
+      '<< /Type /Catalog /Pages 2 0 R >>',
+      '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+      '<< /Length ${stream.length} >>\nstream\n$stream\nendstream',
+      '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    ];
+    final buffer = StringBuffer('%PDF-1.4\n');
+    final offsets = <int>[0];
+    var length = buffer.length;
+    for (var i = 0; i < objects.length; i++) {
+      offsets.add(length);
+      final object = '${i + 1} 0 obj\n${objects[i]}\nendobj\n';
+      buffer.write(object);
+      length += object.length;
+    }
+    final xref = length;
+    buffer.writeln('xref');
+    buffer.writeln('0 ${objects.length + 1}');
+    buffer.writeln('0000000000 65535 f ');
+    for (final offset in offsets.skip(1)) {
+      buffer.writeln('${offset.toString().padLeft(10, '0')} 00000 n ');
+    }
+    buffer.writeln('trailer << /Root 1 0 R /Size ${objects.length + 1} >>');
+    buffer.writeln('startxref');
+    buffer.writeln(xref);
+    buffer.writeln('%%EOF');
+    return latin1.encode(buffer.toString());
+  }
+
+  void _showInwardSavedDialog(LocalInwardSession session, File pdf) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Inward saved: ${session.sessionNumber} | PDF: ${pdf.path}',
+        ),
+        behavior: SnackBarBehavior.floating,
+        width: 420,
+        backgroundColor: const Color(0xFF0B57D0),
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final computed = computation;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 760;
+
+        return Scaffold(
+          backgroundColor: const Color(0xFFF6F8FC),
+          bottomNavigationBar: compact ? const _MobileBottomNav() : null,
+          body: SafeArea(
+            child: compact
+                ? ListView(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+                    children: [
+                      _mobileTopBar(),
+                      _mobileWeightCard(computed),
+                      const SizedBox(height: 10),
+                      FilledButton.icon(
+                        onPressed: computed == null
+                            ? null
+                            : () async {
+                                final saved = await _capture();
+                                if (saved != null) await _printLabel();
+                              },
+                        icon: const Icon(Icons.send_rounded),
+                        label: const Text('SAVE & PRINT LABEL'),
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(74),
+                          textStyle: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      _mobileSelectionCard(),
+                      const SizedBox(height: 18),
+                      _recentCard(compact: true),
+                    ],
+                  )
+                : Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      children: [
+                        _desktopTopBar(),
+                        Expanded(
+                          child: Row(
+                            children: [
+                              Expanded(
+                                flex: 3,
+                                child: _desktopWeightPanel(computed),
+                              ),
+                              const SizedBox(width: 18),
+                              Expanded(
+                                flex: 2,
+                                child: Column(
+                                  children: [
+                                    Expanded(
+                                      flex: 5,
+                                      child: SingleChildScrollView(
+                                        child: _desktopActionPanel(computed),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 18),
+                                    Expanded(flex: 4, child: _recentCard()),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _desktopTopBar() {
+    return Container(
+      height: 64,
+      margin: const EdgeInsets.only(bottom: 18),
+      padding: const EdgeInsets.symmetric(horizontal: 22),
+      decoration: _stationDecoration(),
+      child: Row(
+        children: [
+          IconButton(
+            tooltip: 'Back to dashboard',
+            onPressed: () => context.go('/'),
+            icon: const Icon(Icons.arrow_back_rounded),
+          ),
+          const SizedBox(width: 8),
+          Image.asset(
+            'assets/brand/punit-logo.png',
+            width: 104,
+            height: 42,
+            fit: BoxFit.contain,
+          ),
+          const Spacer(),
+          _DeviceBadge(
+            label: 'Scale',
+            connected: _scaleConnected,
+            icon: Icons.sensors_rounded,
+          ),
+          const SizedBox(width: 8),
+          _DeviceBadge(
+            label: 'Printer',
+            connected: printerStatus == PrinterConnectionStatus.connected,
+            icon: Icons.print_outlined,
+          ),
+          const SizedBox(width: 12),
+          SizedBox(
+            height: 42,
+            width: 164,
+            child: OutlinedButton.icon(
+              onPressed: _showPrinterConnector,
+              icon: const Icon(Icons.print_outlined, size: 18),
+              label: const Text('Printer Config'),
+            ),
+          ),
+          const SizedBox(width: 10),
+          SizedBox(
+            height: 42,
+            width: 164,
+            child: FilledButton.icon(
+              onPressed: _showScaleConnector,
+              icon: const Icon(Icons.sensors_rounded, size: 18),
+              label: const Text('Connect Scale'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _mobileTopBar() {
+    return SizedBox(
+      height: 64,
+      child: Row(
+        children: [
+          IconButton(
+            tooltip: 'Back',
+            onPressed: () => context.go('/'),
+            icon: const Icon(Icons.arrow_back_rounded),
+          ),
+          const SizedBox(width: 8),
+          Image.asset(
+            'assets/brand/punit-logo.png',
+            width: 104,
+            height: 42,
+            fit: BoxFit.contain,
+          ),
+          const Spacer(),
+          _DeviceIcon(
+            connected: _scaleConnected,
+            icon: Icons.sensors_rounded,
+            tooltip: 'Scale connection',
+          ),
+          _DeviceIcon(
+            connected: printerStatus == PrinterConnectionStatus.connected,
+            icon: Icons.print_outlined,
+            tooltip: 'Printer connection',
+          ),
+          IconButton(
+            onPressed: _showScaleConnector,
+            icon: const Icon(Icons.tune_rounded, color: Color(0xFF0B57D0)),
+          ),
+          IconButton(
+            onPressed: _showPrinterConnector,
+            icon: const Icon(Icons.print_outlined, color: Color(0xFF0B57D0)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _desktopWeightPanel(WeightComputation? computed) {
+    return Container(
+      padding: const EdgeInsets.all(22),
+      decoration: _stationDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Live Weight',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _scaleConnected
+                          ? 'Connected to weighing scale'
+                          : 'Weighing scale not connected',
+                      style: TextStyle(
+                        color: _scaleConnected
+                            ? const Color(0xFF087A4A)
+                            : const Color(0xFFB42318),
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              _ScaleLiveBadge(connected: _scaleConnected),
+            ],
+          ),
+          const SizedBox(height: 28),
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFFEAF1FC),
+                border: const Border(
+                  top: BorderSide(color: Color(0xFF0B57D0), width: 4),
+                ),
+              ),
+              child: Center(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    reading.grossWeight.toStringAsFixed(3),
+                    style: const TextStyle(
+                      color: Color(0xFF0B57D0),
+                      fontSize: 200,
+                      height: 0.9,
+                      fontWeight: FontWeight.w300,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 18),
+          LinearProgressIndicator(
+            value: reading.isStable ? 1 : 0.48,
+            minHeight: 4,
+            color: const Color(0xFF0B57D0),
+            backgroundColor: const Color(0xFFE2E8F0),
+          ),
+          const SizedBox(height: 28),
+          Row(
+            children: [
+              _InlineMeasure(
+                label: 'TARE WEIGHT',
+                value: '${computed?.tare.toStringAsFixed(3) ?? '0.000'} kg',
+                onTap: _editTare,
+              ),
+              const Spacer(),
+              _InlineMeasure(
+                label: 'NET WEIGHT',
+                value: '${computed?.net.toStringAsFixed(3) ?? '0.000'} kg',
+                alignRight: true,
+                emphasized: true,
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          FilledButton.icon(
+            onPressed: computed == null
+                ? null
+                : () async {
+                    final saved = await _capture();
+                    if (saved != null) await _printLabel();
+                  },
+            icon: const Icon(Icons.print_outlined),
+            label: const Text('SAVE & PRINT LABEL'),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(62),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _mobileWeightCard(WeightComputation? computed) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(22, 20, 22, 22),
+      decoration: _stationDecoration(),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              _ScaleLiveBadge(connected: _scaleConnected, compact: true),
+              const Spacer(),
+              const Text(
+                'NET WEIGHT',
+                style: TextStyle(
+                  color: Color(0xFF334155),
+                  fontSize: 11,
+                  letterSpacing: 1.1,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  (computed?.net ?? reading.grossWeight).toStringAsFixed(3),
+                  style: const TextStyle(
+                    fontSize: 64,
+                    height: 0.95,
+                    color: Color(0xFF0F1B2D),
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 7),
+                  child: Text(
+                    'kg',
+                    style: TextStyle(
+                      color: Color(0xFF0B57D0),
+                      fontWeight: FontWeight.w900,
+                      fontSize: 27,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 26),
+          const Divider(),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _MobileMeasure(
+                  label: 'TARE',
+                  value: '${computed?.tare.toStringAsFixed(3) ?? '0.000'} kg',
+                  onTap: _editTare,
+                ),
+              ),
+              Container(width: 1, height: 36, color: const Color(0xFFD3DDEB)),
+              Expanded(
+                child: _MobileMeasure(
+                  label: 'GROSS',
+                  value:
+                      '${computed?.gross.toStringAsFixed(3) ?? reading.grossWeight.toStringAsFixed(3)} kg',
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _desktopActionPanel(WeightComputation? computed) {
+    return Container(
+      padding: const EdgeInsets.all(22),
+      decoration: _stationDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const _SectionLabel('PRODUCT SELECTION'),
+          _productDropdown(),
+          _dynamicDetails(),
+          const SizedBox(height: 22),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: activeInwardSession?.status == 'open'
+                      ? null
+                      : _startInwardSession,
+                  icon: const Icon(Icons.play_arrow_rounded),
+                  label: const Text('START TRANSACTION'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF087A4A),
+                    minimumSize: const Size.fromHeight(76),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: activeInwardSession?.status == 'open'
+                      ? _finishInwardSession
+                      : null,
+                  icon: const Icon(Icons.stop_circle_outlined),
+                  label: const Text('STOP TRANSACTION'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF0B57D0),
+                    minimumSize: const Size.fromHeight(76),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          _SessionStrip(session: activeInwardSession),
+          const SizedBox(height: 12),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: autoCapture,
+            onChanged: (value) => setState(() => autoCapture = value),
+            title: const Text('Auto capture'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _mobileSelectionCard() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _SectionLabel('PRODUCT SELECTION'),
+        const SizedBox(height: 8),
+        _productDropdown(),
+        _dynamicDetails(compact: true),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: activeInwardSession?.status == 'open'
+                    ? null
+                    : _startInwardSession,
+                icon: const Icon(Icons.play_arrow_rounded),
+                label: const Text('START TRANSACTION'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: activeInwardSession?.status == 'open'
+                    ? _finishInwardSession
+                    : null,
+                icon: const Icon(Icons.stop_circle_outlined),
+                label: const Text('SAVE / STOP'),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _SessionStrip(session: activeInwardSession),
+      ],
+    );
+  }
+
+  Widget _dynamicDetails({bool compact = false}) {
+    if (fields.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: EdgeInsets.only(top: compact ? 10 : 14),
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: EdgeInsets.zero,
+        title: const Text(
+          'Product detail fields',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
+        subtitle: const Text('Used for labels and saved transactions'),
+        children: fields.map((field) => _dynamicField(field)).toList(),
+      ),
+    );
+  }
+
+  Widget _productDropdown() {
+    return DropdownButtonFormField<ProductConfig>(
+      initialValue: selectedProduct,
+      isExpanded: true,
+      decoration: _fieldDecoration(),
+      items: products
+          .map(
+            (product) => DropdownMenuItem(
+              value: product,
+              child: Text(product.name, overflow: TextOverflow.ellipsis),
+            ),
+          )
+          .toList(),
+      onChanged: (product) async {
+        setState(() {
+          selectedProduct = product;
+          selectedVariant = null;
+        });
+        await _refreshDerived();
+      },
+    );
+  }
+
+  Widget _recentCard({bool compact = false}) {
+    return Container(
+      clipBehavior: Clip.antiAlias,
+      decoration: _stationDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+              compact ? 4 : 18,
+              compact ? 4 : 16,
+              compact ? 4 : 18,
+              compact ? 10 : 8,
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Recent Weighments',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: compact ? 23 : 16,
+                      color: const Color(0xFF0F1B2D),
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => context.go('/reports'),
+                  child: const Text('VIEW ALL'),
+                ),
+              ],
+            ),
+          ),
+          _RecentHeader(compact: compact),
+          if (compact)
+            SizedBox(height: 238, child: _recentList(compact: true))
+          else
+            Expanded(child: _recentList()),
+        ],
+      ),
+    );
+  }
+
+  Widget _recentList({bool compact = false}) {
+    if (recentProductions.isEmpty) {
+      return const Center(child: Text('No weighments yet'));
+    }
+
+    return ListView.separated(
+      primary: false,
+      padding: EdgeInsets.zero,
+      itemCount: recentProductions.length,
+      separatorBuilder: (_, _) => const Divider(height: 1),
+      itemBuilder: (context, index) {
+        final row = recentProductions[index];
+        return _RecentRow(
+          row: row,
+          compact: compact,
+          onDelete: () => _deleteRecentEntry(row),
+        );
+      },
+    );
+  }
+
+  InputDecoration _fieldDecoration() {
+    return const InputDecoration(
+      filled: true,
+      fillColor: Color(0xFFF6F9FE),
+      border: OutlineInputBorder(),
+      enabledBorder: OutlineInputBorder(
+        borderSide: BorderSide(color: Color(0xFFD6E0EF)),
+      ),
+      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 17),
+    );
+  }
+
+  BoxDecoration _stationDecoration() {
+    return BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(color: const Color(0xFFDDE6F2)),
+      boxShadow: [
+        BoxShadow(
+          color: const Color(0xFF0F172A).withValues(alpha: 0.04),
+          blurRadius: 20,
+          offset: const Offset(0, 10),
+        ),
+      ],
+    );
+  }
+
+  Widget _dynamicField(DynamicFieldConfig field) {
+    if (field.options.isNotEmpty || field.dataType == 'dropdown') {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: DropdownButtonFormField<String>(
+          decoration: InputDecoration(
+            labelText: field.required
+                ? '${field.fieldLabel} *'
+                : field.fieldLabel,
+            border: const OutlineInputBorder(),
+          ),
+          initialValue: _selectedDynamicDropdownValue(field),
+          items: [
+            const DropdownMenuItem(
+              value: '',
+              child: Text('None / leave blank'),
+            ),
+            ...field.options.map(
+              (option) => DropdownMenuItem(
+                value: '${option['label'] ?? option['value']}',
+                child: Text('${option['label'] ?? option['value']}'),
+              ),
+            ),
+          ],
+          onChanged: field.editable
+              ? (value) => setState(() {
+                  if (value == null || value.isEmpty) {
+                    dynamicValues.remove(field.internalKey);
+                  } else {
+                    dynamicValues[field.internalKey] = value;
+                  }
+                })
+              : null,
+        ),
+      );
+    }
+
+    final controller = fieldControllers.putIfAbsent(
+      field.internalKey,
+      () => TextEditingController(text: dynamicValues[field.internalKey]),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: TextFormField(
+        controller: controller,
+        enabled: field.editable,
+        keyboardType: switch (field.dataType) {
+          'integer' || 'decimal' => TextInputType.number,
+          _ => TextInputType.text,
+        },
+        onChanged: (value) => dynamicValues[field.internalKey] = value,
+        decoration: InputDecoration(
+          labelText: field.required
+              ? '${field.fieldLabel} *'
+              : field.fieldLabel,
+          border: const OutlineInputBorder(),
+        ),
+      ),
+    );
+  }
+
+  String _selectedDynamicDropdownValue(DynamicFieldConfig field) {
+    final current = dynamicValues[field.internalKey];
+    if (current == null || current.isEmpty) return '';
+
+    for (final option in field.options) {
+      final label = '${option['label'] ?? option['value']}';
+      final value = '${option['value'] ?? option['label']}';
+      if (current == label || current == value) return label;
+    }
+
+    return '';
+  }
+}
+
+class _DeviceBadge extends StatelessWidget {
+  const _DeviceBadge({
+    required this.label,
+    required this.connected,
+    required this.icon,
+  });
+
+  final String label;
+  final bool connected;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: connected ? const Color(0xFFE8F8EE) : const Color(0xFFF8FAFC),
+        border: Border.all(
+          color: connected ? const Color(0xFF86D39D) : const Color(0xFFD6E0EF),
+        ),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 15,
+            color: connected
+                ? const Color(0xFF087A4A)
+                : const Color(0xFF94A3B8),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            connected ? '$label Connected' : '$label Off',
+            style: TextStyle(
+              color: connected
+                  ? const Color(0xFF087A4A)
+                  : const Color(0xFF64748B),
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DeviceIcon extends StatelessWidget {
+  const _DeviceIcon({
+    required this.connected,
+    required this.icon,
+    required this.tooltip,
+  });
+
+  final bool connected;
+  final IconData icon;
+  final String tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: connected ? '$tooltip connected' : '$tooltip not connected',
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2),
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Icon(icon, color: const Color(0xFF0B57D0)),
+            Positioned(
+              right: -1,
+              top: -1,
+              child: Container(
+                width: 9,
+                height: 9,
+                decoration: BoxDecoration(
+                  color: connected
+                      ? const Color(0xFF087A4A)
+                      : const Color(0xFFEF4444),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 1.5),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ScaleLiveBadge extends StatelessWidget {
+  const _ScaleLiveBadge({required this.connected, this.compact = false});
+
+  final bool connected;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 8 : 12,
+        vertical: compact ? 4 : 7,
+      ),
+      decoration: BoxDecoration(
+        color: connected ? const Color(0xFF067A4A) : const Color(0xFFB42318),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.sensors_rounded, size: 14, color: Colors.white),
+          const SizedBox(width: 4),
+          Text(
+            connected ? 'SCALE LIVE' : 'NO SCALE',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      label,
+      style: const TextStyle(
+        color: Color(0xFF8A9AB4),
+        fontSize: 11,
+        letterSpacing: 1.4,
+        fontWeight: FontWeight.w900,
+      ),
+    );
+  }
+}
+
+class _InlineMeasure extends StatelessWidget {
+  const _InlineMeasure({
+    required this.label,
+    required this.value,
+    this.alignRight = false,
+    this.emphasized = false,
+    this.onTap,
+  });
+
+  final String label;
+  final String value;
+  final bool alignRight;
+  final bool emphasized;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+        child: Column(
+          crossAxisAlignment: alignRight
+              ? CrossAxisAlignment.end
+              : CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(
+                color: Color(0xFF8A9AB4),
+                fontSize: 11,
+                letterSpacing: 1.2,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  value,
+                  style: TextStyle(
+                    color: const Color(0xFF0F1B2D),
+                    fontSize: emphasized ? 22 : 16,
+                    fontWeight: emphasized ? FontWeight.w900 : FontWeight.w700,
+                  ),
+                ),
+                if (onTap != null) ...[
+                  const SizedBox(width: 5),
+                  const Icon(Icons.edit_outlined, size: 15),
+                ],
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MobileMeasure extends StatelessWidget {
+  const _MobileMeasure({required this.label, required this.value, this.onTap});
+
+  final String label;
+  final String value;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Column(
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              color: Color(0xFF334155),
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                value,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Color(0xFF0F1B2D),
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              if (onTap != null) ...[
+                const SizedBox(width: 5),
+                const Icon(Icons.edit_outlined, size: 16),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SessionStrip extends StatelessWidget {
+  const _SessionStrip({required this.session});
+
+  final LocalInwardSession? session;
+
+  @override
+  Widget build(BuildContext context) {
+    final active = session?.status == 'open';
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: active ? const Color(0xFFEFF6FF) : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: const Color(0xFFD6E0EF)),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            active ? Icons.play_circle_outline : Icons.info_outline,
+            color: active ? const Color(0xFF0B57D0) : const Color(0xFF64748B),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              active
+                  ? '${session!.sessionNumber}  |  ${session!.entryCount} entries  |  ${session!.totalNetWeight.toStringAsFixed(3)} kg'
+                  : 'Start an inward session before saving weight',
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RecentHeader extends StatelessWidget {
+  const _RecentHeader({required this.compact});
+
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: const Color(0xFFE8F0FC),
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 18 : 22,
+        vertical: compact ? 12 : 14,
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 2,
+            child: Text(
+              compact ? 'SERIAL NO' : 'SERIAL NO',
+              style: _headerStyle(),
+            ),
+          ),
+          Expanded(
+            flex: 1,
+            child: Text(
+              'WEIGHT',
+              textAlign: TextAlign.center,
+              style: _headerStyle(),
+            ),
+          ),
+          Expanded(
+            flex: 1,
+            child: Text(
+              'TIME',
+              textAlign: TextAlign.end,
+              style: _headerStyle(),
+            ),
+          ),
+          SizedBox(width: compact ? 42 : 40),
+        ],
+      ),
+    );
+  }
+
+  TextStyle _headerStyle() {
+    return const TextStyle(
+      color: Color(0xFF334155),
+      fontSize: 11,
+      fontWeight: FontWeight.w900,
+      letterSpacing: 0.8,
+    );
+  }
+}
+
+class _RecentRow extends StatelessWidget {
+  const _RecentRow({
+    required this.row,
+    required this.compact,
+    required this.onDelete,
+  });
+
+  final LocalProductionTransaction row;
+  final bool compact;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final time =
+        '${row.capturedAt.hour.toString().padLeft(2, '0')}:${row.capturedAt.minute.toString().padLeft(2, '0')}:${row.capturedAt.second.toString().padLeft(2, '0')}';
+
+    return Padding(
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 18 : 18,
+        vertical: compact ? 14 : 8,
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 2,
+            child: Text(
+              compact ? '#${row.serialNumber}' : row.serialNumber,
+              maxLines: compact ? 2 : 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+          Expanded(
+            flex: 1,
+            child: Text(
+              compact
+                  ? '${row.netWeight.toStringAsFixed(3)}\nkg'
+                  : '${row.netWeight.toStringAsFixed(3)} kg',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: const Color(0xFF0F1B2D),
+                fontSize: compact ? 16 : 15,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 1,
+            child: Text(
+              time,
+              textAlign: TextAlign.end,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Color(0xFF334155),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          SizedBox(
+            width: compact ? 42 : 40,
+            height: compact ? 42 : 36,
+            child: IconButton(
+              tooltip: 'Delete mistaken weighment',
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+              onPressed: onDelete,
+              icon: const Icon(Icons.delete_outline, color: Color(0xFFB42318)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MobileBottomNav extends StatelessWidget {
+  const _MobileBottomNav();
+
+  @override
+  Widget build(BuildContext context) {
+    return NavigationBar(
+      selectedIndex: 0,
+      height: 76,
+      onDestinationSelected: (index) {
+        final routes = ['/weighing', '/reports', '/products', '/'];
+        context.go(routes[index]);
+      },
+      destinations: const [
+        NavigationDestination(
+          icon: Icon(Icons.monitor_weight_outlined),
+          selectedIcon: Icon(Icons.monitor_weight),
+          label: 'Weigh',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.history_rounded),
+          label: 'History',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.inventory_2_outlined),
+          label: 'Products',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.person_outline),
+          label: 'Profile',
+        ),
+      ],
+    );
+  }
+}
