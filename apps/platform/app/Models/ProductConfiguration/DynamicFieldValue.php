@@ -2,6 +2,7 @@
 
 namespace App\Models\ProductConfiguration;
 
+use App\Casts\NullableDecimal;
 use App\Models\Concerns\HasUuidPrimaryKey;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
@@ -14,7 +15,7 @@ class DynamicFieldValue extends Model
     protected function casts(): array
     {
         return [
-            'decimal_value' => 'decimal:6',
+            'decimal_value' => NullableDecimal::class.':6',
             'integer_value' => 'integer',
             'boolean_value' => 'boolean',
             'date_value' => 'datetime',

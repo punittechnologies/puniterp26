@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\NullableDecimal;
 use App\Models\Concerns\HasUuidPrimaryKey;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
@@ -17,10 +18,10 @@ class ProductionTransaction extends Model
             'product_snapshot' => 'array',
             'dynamic_values' => 'array',
             'raw_reading' => 'array',
-            'gross_weight' => 'decimal:6',
-            'tare_weight' => 'decimal:6',
-            'net_weight' => 'decimal:6',
-            'piece_quantity' => 'decimal:6',
+            'gross_weight' => NullableDecimal::class.':6',
+            'tare_weight' => NullableDecimal::class.':6',
+            'net_weight' => NullableDecimal::class.':6',
+            'piece_quantity' => NullableDecimal::class.':6',
             'captured_at' => 'datetime',
         ];
     }

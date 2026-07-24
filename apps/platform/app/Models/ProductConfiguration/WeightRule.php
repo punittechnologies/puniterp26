@@ -2,6 +2,7 @@
 
 namespace App\Models\ProductConfiguration;
 
+use App\Casts\NullableDecimal;
 use App\Models\Concerns\HasUuidPrimaryKey;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
@@ -14,14 +15,14 @@ class WeightRule extends Model
     protected function casts(): array
     {
         return [
-            'minimum_weight' => 'decimal:3',
-            'maximum_weight' => 'decimal:3',
-            'target_weight' => 'decimal:3',
-            'tare_weight' => 'decimal:3',
+            'minimum_weight' => NullableDecimal::class.':3',
+            'maximum_weight' => NullableDecimal::class.':3',
+            'target_weight' => NullableDecimal::class.':3',
+            'tare_weight' => NullableDecimal::class.':3',
             'decimal_precision' => 'integer',
             'stability_duration_ms' => 'integer',
-            'stability_tolerance' => 'decimal:3',
-            'reset_threshold' => 'decimal:3',
+            'stability_tolerance' => NullableDecimal::class.':3',
+            'reset_threshold' => NullableDecimal::class.':3',
             'auto_print_enabled' => 'boolean',
             'manual_print_enabled' => 'boolean',
             'duplicate_print_prevention_enabled' => 'boolean',

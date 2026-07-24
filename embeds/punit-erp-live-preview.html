@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Punit ERP Live Preview</title>
+  <style>
+    :root {
+      --blue: #075bd8;
+      --blue-2: #0a6cff;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --line: #dbe7f5;
+      --soft: #f5f9ff;
+      --green: #07845c;
+      --shadow: 0 18px 55px rgba(15, 23, 42, .12);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: linear-gradient(180deg, #f8fbff 0%, #eef6ff 100%);
+      color: var(--ink);
+    }
+
+    .punit-demo {
+      width: min(1180px, 100%);
+      margin: 0 auto;
+      padding: 28px;
+    }
+
+    .demo-shell {
+      background: rgba(255,255,255,.92);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--line);
+      background: white;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 900;
+      letter-spacing: .02em;
+      color: var(--blue);
+    }
+
+    .logo {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border-radius: 10px;
+      background: var(--blue);
+      color: white;
+      font-weight: 900;
+    }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 7px 11px;
+      font-size: 12px;
+      font-weight: 800;
+      color: #24415f;
+      background: #f8fbff;
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 99px;
+      background: var(--green);
+      box-shadow: 0 0 0 4px rgba(7,132,92,.12);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(320px, .75fr);
+      gap: 18px;
+      padding: 20px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: white;
+      overflow: hidden;
+    }
+
+    .card-pad { padding: 18px; }
+
+    .eyebrow {
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: .13em;
+      color: #7e95b1;
+      text-transform: uppercase;
+    }
+
+    .weight-panel {
+      min-height: 440px;
+      background: linear-gradient(180deg, #f7fbff 0%, #edf5ff 100%);
+      border-top: 5px solid var(--blue);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 28px;
+      text-align: center;
+      position: relative;
+    }
+
+    .stable {
+      position: absolute;
+      top: 18px;
+      right: 18px;
+      background: #047857;
+      color: white;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: .08em;
+    }
+
+    .weight {
+      font-size: clamp(74px, 15vw, 190px);
+      line-height: .9;
+      font-weight: 950;
+      color: var(--blue);
+      letter-spacing: -.04em;
+    }
+
+    .unit {
+      font-size: clamp(24px, 4vw, 44px);
+      color: var(--blue);
+      font-weight: 900;
+      margin-left: 6px;
+    }
+
+    .scale-line {
+      width: min(420px, 78%);
+      height: 5px;
+      background: #dbe7f7;
+      border-radius: 99px;
+      margin: 26px auto 0;
+      overflow: hidden;
+    }
+
+    .scale-line span {
+      display: block;
+      width: 68%;
+      height: 100%;
+      background: var(--blue-2);
+      border-radius: inherit;
+      transition: width .35s ease;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      padding: 14px;
+      border-top: 1px solid var(--line);
+    }
+
+    .metric {
+      padding: 12px;
+      border-radius: 12px;
+      background: var(--soft);
+    }
+
+    .metric small {
+      display: block;
+      color: #7e95b1;
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 4px;
+      font-size: 20px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: .1em;
+      color: #7186a2;
+      text-transform: uppercase;
+    }
+
+    select, input {
+      width: 100%;
+      border: 1px solid #cedced;
+      border-radius: 10px;
+      padding: 13px 14px;
+      color: var(--ink);
+      background: #f8fbff;
+      font: inherit;
+      font-weight: 700;
+      outline: none;
+    }
+
+    select:focus, input:focus {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 4px rgba(7,91,216,.1);
+    }
+
+    .field-group { margin-bottom: 14px; }
+
+    .actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 12px;
+      padding: 15px 16px;
+      font: inherit;
+      font-weight: 900;
+      color: white;
+      background: var(--blue);
+      box-shadow: 0 10px 24px rgba(7,91,216,.2);
+      cursor: pointer;
+      transition: transform .15s ease, box-shadow .15s ease;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 14px 30px rgba(7,91,216,.26);
+    }
+
+    button.secondary {
+      background: #07845c;
+      box-shadow: 0 10px 24px rgba(7,132,92,.2);
+    }
+
+    .label-preview {
+      margin-top: 16px;
+      border: 1px dashed #b5c8de;
+      border-radius: 14px;
+      padding: 14px;
+      background: #fbfdff;
+    }
+
+    .sticker {
+      width: 235px;
+      max-width: 100%;
+      min-height: 210px;
+      margin: 12px auto 0;
+      border: 2px solid #111827;
+      background: white;
+      padding: 10px;
+      color: #111827;
+      font-family: Arial, sans-serif;
+    }
+
+    .sticker h3 {
+      margin: 0 0 8px;
+      font-size: 18px;
+      text-align: center;
+      line-height: 1.1;
+    }
+
+    .sticker-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      border-top: 1px solid #111827;
+      padding-top: 7px;
+      margin-top: 7px;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .barcode {
+      margin-top: 12px;
+      height: 48px;
+      background: repeating-linear-gradient(90deg, #111827 0 2px, transparent 2px 5px, #111827 5px 7px, transparent 7px 11px);
+    }
+
+    .serial {
+      margin-top: 5px;
+      text-align: center;
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: .08em;
+    }
+
+    .recent {
+      margin-top: 18px;
+      border-top: 1px solid var(--line);
+      padding-top: 16px;
+    }
+
+    .table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .table th,
+    .table td {
+      text-align: left;
+      padding: 11px 8px;
+      border-bottom: 1px solid #edf2f7;
+    }
+
+    .table th {
+      color: #7186a2;
+      font-size: 10px;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+
+    .toast {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      max-width: 340px;
+      padding: 14px 16px;
+      border-radius: 14px;
+      background: #047857;
+      color: white;
+      font-weight: 800;
+      box-shadow: var(--shadow);
+      transform: translateY(120%);
+      transition: transform .25s ease;
+      z-index: 20;
+    }
+
+    .toast.show { transform: translateY(0); }
+
+    @media (max-width: 860px) {
+      .punit-demo { padding: 12px; }
+      .grid { grid-template-columns: 1fr; padding: 12px; }
+      .topbar { align-items: flex-start; }
+      .status-row { justify-content: flex-start; }
+      .weight-panel { min-height: 300px; padding: 22px 14px; }
+      .metrics { grid-template-columns: 1fr 1fr; }
+      .actions { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <section class="punit-demo" aria-label="Punit ERP live product preview">
+    <div class="demo-shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="logo">P</div>
+          <div>
+            <div>PUNIT ERP</div>
+            <small style="color:#64748b;font-weight:800;">Weighing • Labels • Inventory • Dispatch</small>
+          </div>
+        </div>
+        <div class="status-row">
+          <span class="pill"><span class="dot"></span> Scale Connected</span>
+          <span class="pill"><span class="dot"></span> Printer Ready</span>
+          <span class="pill"><span class="dot"></span> Cloud Sync</span>
+        </div>
+      </header>
+
+      <div class="grid">
+        <main class="card">
+          <div class="card-pad">
+            <div class="eyebrow">Live Weighing Preview</div>
+          </div>
+          <div class="weight-panel">
+            <div class="stable">STABLE</div>
+            <div>
+              <span class="weight" id="netWeight">12.480</span><span class="unit">kg</span>
+            </div>
+            <div class="scale-line"><span id="progressBar"></span></div>
+          </div>
+          <div class="metrics">
+            <div class="metric">
+              <small>Gross</small>
+              <strong><span id="grossWeight">13.280</span> kg</strong>
+            </div>
+            <div class="metric">
+              <small>Tare</small>
+              <strong><span id="tareWeight">0.800</span> kg</strong>
+            </div>
+            <div class="metric">
+              <small>Inventory</small>
+              <strong><span id="inventoryWeight">248.6</span> kg</strong>
+            </div>
+          </div>
+        </main>
+
+        <aside>
+          <div class="card card-pad">
+            <div class="field-group">
+              <label for="product">Product Selection</label>
+              <select id="product">
+                <option value="NON WOVEN">NON WOVEN</option>
+                <option value="BUILDING ROLL">BUILDING ROLL</option>
+                <option value="LOOSE WOOL">LOOSE WOOL</option>
+              </select>
+            </div>
+
+            <div class="field-group">
+              <label for="detail">Product Details</label>
+              <select id="detail">
+                <option value="Blue • 350 GSM • 3000 MTR">Blue • 350 GSM • 3000 MTR</option>
+                <option value="Red • 350 GSM • 3000 MTR">Red • 350 GSM • 3000 MTR</option>
+                <option value="Premium • 15x25">Premium • 15x25</option>
+              </select>
+            </div>
+
+            <div class="actions">
+              <button class="secondary" id="captureBtn">Save Weight</button>
+              <button id="printBtn">Print Label</button>
+            </div>
+
+            <div class="label-preview">
+              <div class="eyebrow">Barcode Label Preview</div>
+              <div class="sticker" aria-label="Sample barcode label">
+                <h3 id="labelProduct">NON WOVEN</h3>
+                <div class="sticker-row"><span>Detail</span><span id="labelDetail">Blue 350 GSM</span></div>
+                <div class="sticker-row"><span>Gross</span><span id="labelGross">13.280 kg</span></div>
+                <div class="sticker-row"><span>Tare</span><span id="labelTare">0.800 kg</span></div>
+                <div class="sticker-row"><span>Net</span><span id="labelNet">12.480 kg</span></div>
+                <div class="barcode"></div>
+                <div class="serial" id="labelSerial">PHK-240711-001</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card card-pad recent">
+            <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
+              <div>
+                <div class="eyebrow">Recent Weighments</div>
+                <strong>Current session</strong>
+              </div>
+              <span class="pill">Auto report</span>
+            </div>
+            <table class="table" aria-label="Recent weighing entries">
+              <thead>
+                <tr><th>Serial</th><th>Weight</th><th>Status</th></tr>
+              </thead>
+              <tbody id="recentRows">
+                <tr><td>PHK-001</td><td>12.480 kg</td><td>Synced</td></tr>
+                <tr><td>PHK-002</td><td>12.455 kg</td><td>Synced</td></tr>
+                <tr><td>PHK-003</td><td>12.510 kg</td><td>Synced</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <div class="toast" id="toast">Label printed and inventory updated successfully.</div>
+
+  <script>
+    const product = document.getElementById('product');
+    const detail = document.getElementById('detail');
+    const netWeight = document.getElementById('netWeight');
+    const grossWeight = document.getElementById('grossWeight');
+    const tareWeight = document.getElementById('tareWeight');
+    const inventoryWeight = document.getElementById('inventoryWeight');
+    const labelProduct = document.getElementById('labelProduct');
+    const labelDetail = document.getElementById('labelDetail');
+    const labelGross = document.getElementById('labelGross');
+    const labelTare = document.getElementById('labelTare');
+    const labelNet = document.getElementById('labelNet');
+    const labelSerial = document.getElementById('labelSerial');
+    const recentRows = document.getElementById('recentRows');
+    const progressBar = document.getElementById('progressBar');
+    const toast = document.getElementById('toast');
+
+    let serial = 4;
+    let inventory = 248.6;
+
+    function randomWeight() {
+      const net = 12.35 + Math.random() * 0.32;
+      const tare = 0.8;
+      const gross = net + tare;
+      return { net, tare, gross };
+    }
+
+    function updatePreview() {
+      const detailText = detail.value.replaceAll(' • ', ' ');
+      labelProduct.textContent = product.value;
+      labelDetail.textContent = detailText.length > 18 ? detailText.slice(0, 18) : detailText;
+      labelGross.textContent = grossWeight.textContent + ' kg';
+      labelTare.textContent = tareWeight.textContent + ' kg';
+      labelNet.textContent = netWeight.textContent + ' kg';
+    }
+
+    function showToast(text) {
+      toast.textContent = text;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2200);
+    }
+
+    function capture(print) {
+      const w = randomWeight();
+      netWeight.textContent = w.net.toFixed(3);
+      grossWeight.textContent = w.gross.toFixed(3);
+      tareWeight.textContent = w.tare.toFixed(3);
+      inventory += w.net;
+      inventoryWeight.textContent = inventory.toFixed(1);
+      progressBar.style.width = `${55 + Math.random() * 35}%`;
+      labelSerial.textContent = `PHK-240711-${String(serial).padStart(3, '0')}`;
+      updatePreview();
+
+      const row = document.createElement('tr');
+      row.innerHTML = `<td>PHK-${String(serial).padStart(3, '0')}</td><td>${w.net.toFixed(3)} kg</td><td>${print ? 'Printed' : 'Saved'}</td>`;
+      recentRows.prepend(row);
+      while (recentRows.children.length > 5) recentRows.removeChild(recentRows.lastElementChild);
+      serial++;
+      showToast(print ? 'Label printed, inventory updated, report synced.' : 'Weight saved and inventory synced.');
+    }
+
+    product.addEventListener('change', updatePreview);
+    detail.addEventListener('change', updatePreview);
+    document.getElementById('captureBtn').addEventListener('click', () => capture(false));
+    document.getElementById('printBtn').addEventListener('click', () => capture(true));
+    updatePreview();
+  </script>
+</body>
+</html>

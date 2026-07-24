@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\NullableDecimal;
 use App\Models\Concerns\HasUuidPrimaryKey;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
@@ -14,8 +15,8 @@ class InventoryTransaction extends Model
     protected function casts(): array
     {
         return [
-            'weight_quantity' => 'decimal:6',
-            'piece_quantity' => 'decimal:6',
+            'weight_quantity' => NullableDecimal::class.':6',
+            'piece_quantity' => NullableDecimal::class.':6',
             'occurred_at' => 'datetime',
         ];
     }

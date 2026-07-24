@@ -68,6 +68,11 @@ class MainActivity : FlutterActivity() {
                     val args = call.arguments as? Map<*, *> ?: emptyMap<String, Any?>()
                     result.success(tvsPrintRawTspl(args["tspl"]?.toString() ?: ""))
                 }
+                "printRawTsplBytes" -> {
+                    val args = call.arguments as? Map<*, *> ?: emptyMap<String, Any?>()
+                    val bytes = args["bytes"] as? ByteArray ?: ByteArray(0)
+                    result.success(tvsPrintRawBytes(bytes))
+                }
                 else -> result.notImplemented()
             }
         }
@@ -84,6 +89,11 @@ class MainActivity : FlutterActivity() {
                 "printRawTspl" -> {
                     val args = call.arguments as? Map<*, *> ?: emptyMap<String, Any?>()
                     result.success(tscPrintRawTspl(args["tspl"]?.toString() ?: ""))
+                }
+                "printRawTsplBytes" -> {
+                    val args = call.arguments as? Map<*, *> ?: emptyMap<String, Any?>()
+                    val bytes = args["bytes"] as? ByteArray ?: ByteArray(0)
+                    result.success(tscPrintRawBytes(bytes))
                 }
                 else -> result.notImplemented()
             }
@@ -222,15 +232,18 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun tscPrintRawTspl(rawTspl: String): Map<String, Any> {
+        return tscPrintRawBytes(rawTspl.toByteArray(Charsets.US_ASCII))
+    }
+
+    private fun tscPrintRawBytes(bytes: ByteArray): Map<String, Any> {
         if (!tscConnected) {
             return mapOf("ok" to false, "message" to "TSC printer is not connected.")
         }
-        if (rawTspl.isBlank()) {
+        if (bytes.isEmpty()) {
             return mapOf("ok" to false, "message" to "No label command data was generated.")
         }
 
         return try {
-            val bytes = rawTspl.toByteArray(Charsets.US_ASCII)
             val serial = tscSerialPort
             if (serial != null) {
                 serial.write(bytes, 5000)
@@ -445,17 +458,20 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun tvsPrintRawTspl(rawTspl: String): Map<String, Any> {
+        return tvsPrintRawBytes(rawTspl.toByteArray(Charsets.US_ASCII))
+    }
+
+    private fun tvsPrintRawBytes(bytes: ByteArray): Map<String, Any> {
         ensureTvsSdkLoaded()
         val printer = tvsPrinter
         if (!tvsConnected || printer == null) {
             return mapOf("ok" to false, "code" to -10, "message" to "TVS native printer is not connected.")
         }
-        if (rawTspl.isBlank()) {
+        if (bytes.isEmpty()) {
             return mapOf("ok" to false, "code" to -12, "message" to "No label command data was generated.")
         }
 
         return try {
-            val bytes = rawTspl.toByteArray(Charsets.US_ASCII)
             val code = printer.WritePort(bytes, bytes.size)
             if (code == 0) {
                 mapOf("ok" to true, "code" to 0, "message" to "Selected label template sent to TVS printer.")

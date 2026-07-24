@@ -2,6 +2,7 @@
 
 namespace App\Models\Labeling;
 
+use App\Casts\NullableDecimal;
 use App\Models\Concerns\HasUuidPrimaryKey;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
@@ -14,10 +15,10 @@ class LabelTemplateElement extends Model
     protected function casts(): array
     {
         return [
-            'x' => 'decimal:2',
-            'y' => 'decimal:2',
-            'width' => 'decimal:2',
-            'height' => 'decimal:2',
+            'x' => NullableDecimal::class.':2',
+            'y' => NullableDecimal::class.':2',
+            'width' => NullableDecimal::class.':2',
+            'height' => NullableDecimal::class.':2',
             'layer_order' => 'integer',
             'style' => 'array',
             'format' => 'array',

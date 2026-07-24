@@ -240,7 +240,7 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
       );
     }
 
-    final bytes = ascii.encode(_tspl(job));
+    final bytes = _tsplBytes(job);
     try {
       await _writeChunks(characteristic, bytes);
       return PrintResult(
@@ -337,8 +337,8 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
   Future<PrintResult> _printNative(PrintJob job) async {
     try {
       final response = await _tvsChannel.invokeMethod<Map<dynamic, dynamic>>(
-        'printRawTspl',
-        {'tspl': _tspl(job)},
+        'printRawTsplBytes',
+        {'bytes': _tsplBytes(job)},
       );
       final ok = response?['ok'] == true;
       return PrintResult(
@@ -360,8 +360,8 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
   Future<PrintResult> _printTsc(PrintJob job) async {
     try {
       final response = await _tscChannel.invokeMethod<Map<dynamic, dynamic>>(
-        'printRawTspl',
-        {'tspl': _tspl(job)},
+        'printRawTsplBytes',
+        {'bytes': _tsplBytes(job)},
       );
       final ok = response?['ok'] == true;
       return PrintResult(
@@ -536,6 +536,22 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
     return advertisedName.trim();
   }
 
+  Uint8List _tsplBytes(PrintJob job) {
+    final template = job.template;
+    final widthMm = _num(template['widthMm'])?.round() ?? 75;
+    final heightMm = _num(template['heightMm'])?.round() ?? 75;
+    final elements = (template['elements'] is List)
+        ? (template['elements'] as List).whereType<Map>().toList()
+        : const <Map>[];
+    if (elements.isNotEmpty) {
+      return _encodeTsplParts(
+        _tsplFromTemplateParts(job, widthMm, heightMm, elements),
+      );
+    }
+
+    return Uint8List.fromList(ascii.encode(_tspl(job)));
+  }
+
   String _tspl(PrintJob job) {
     final data = job.data;
     final template = job.template;
@@ -614,8 +630,19 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
     int heightMm,
     List<Map> elements,
   ) {
+    return _debugTsplParts(
+      _tsplFromTemplateParts(job, widthMm, heightMm, elements),
+    );
+  }
+
+  List<Object> _tsplFromTemplateParts(
+    PrintJob job,
+    int widthMm,
+    int heightMm,
+    List<Map> elements,
+  ) {
     final data = job.data;
-    final lines = <String>[
+    final lines = <Object>[
       'SIZE $widthMm mm,$heightMm mm',
       'GAP 2 mm,0 mm',
       'DENSITY 14',
@@ -692,13 +719,14 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
       final fontSize = _num(style['fontSize']) ?? 9;
       final weight = style['fontWeight']?.toString() ?? '';
       final align = style['align']?.toString() ?? 'left';
+      final prefix = _affix(element['prefix']);
+      final suffix = _affix(element['suffix']);
       final value = type == 'binding_text'
           ? _bindingValue(element['bindingKey']?.toString(), data)
           : _clean(element['text']).ifEmpty(_clean(element['bindingKey']));
       if (value.isEmpty) continue;
 
-      final text =
-          '${_affix(element['prefix'])}$value${_affix(element['suffix'])}';
+      final text = '$prefix$value$suffix';
       final limitedText = _limit(
         text,
         _charsForWidth(
@@ -706,16 +734,41 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
           fontSize,
         ),
       );
-      lines.add(
-        _text(
-          _alignedX(element, limitedText, fontSize, align),
-          _dots(element['y']),
-          fontSize >= 11 || weight == '800' || weight == '700' ? '3' : '1',
-          fontSize >= 13 ? 2 : 1,
-          fontSize >= 13 ? 2 : 1,
-          limitedText,
-        ),
-      );
+      final prefixFontSize = _num(style['prefixFontSize']) ?? fontSize;
+      final suffixFontSize = _num(style['suffixFontSize']) ?? fontSize;
+      final hasAffixFontOverride =
+          (prefix.isNotEmpty && prefixFontSize != fontSize) ||
+          (suffix.isNotEmpty && suffixFontSize != fontSize);
+      if (hasAffixFontOverride) {
+        lines.addAll(
+          _splitAffixText(
+            element: element,
+            prefix: prefix,
+            value: value,
+            suffix: suffix,
+            fontSize: fontSize,
+            prefixFontSize: prefixFontSize,
+            suffixFontSize: suffixFontSize,
+            weight: weight,
+            align: align,
+            maxChars: _charsForWidth(
+              (_num(element['width']) ?? widthMm).toDouble(),
+              fontSize,
+            ),
+          ),
+        );
+      } else {
+        lines.add(
+          _text(
+            _alignedX(element, limitedText, fontSize, align),
+            _dots(element['y']),
+            _fontName(fontSize, weight),
+            _fontMultiplier(fontSize),
+            _fontMultiplier(fontSize),
+            limitedText,
+          ),
+        );
+      }
     }
 
     if (!hasBarcode) {
@@ -729,6 +782,30 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
     }
 
     lines.addAll(['PRINT 1,1', '']);
+    return lines;
+  }
+
+  Uint8List _encodeTsplParts(List<Object> parts) {
+    final bytes = <int>[];
+    for (final part in parts) {
+      if (part is _BitmapTspl) {
+        bytes.addAll(ascii.encode(part.prefix));
+        bytes.addAll(part.data);
+      } else {
+        bytes.addAll(ascii.encode(part.toString()));
+      }
+      bytes.addAll(const [13, 10]);
+    }
+    return Uint8List.fromList(bytes);
+  }
+
+  String _debugTsplParts(List<Object> parts) {
+    final lines = parts.map((part) {
+      if (part is _BitmapTspl) {
+        return '${part.prefix}<${part.data.length} bitmap bytes>';
+      }
+      return part.toString();
+    });
     return '${lines.join('\r\n')}\r\n';
   }
 
@@ -754,6 +831,82 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
   String _text(int x, int y, String font, int xMul, int yMul, String value) {
     return 'TEXT $x,$y,"$font",0,$xMul,$yMul,"${_escape(value)}"';
   }
+
+  Iterable<String> _splitAffixText({
+    required Map element,
+    required String prefix,
+    required String value,
+    required String suffix,
+    required num fontSize,
+    required num prefixFontSize,
+    required num suffixFontSize,
+    required String weight,
+    required String align,
+    required int maxChars,
+  }) sync* {
+    final limitedPrefix = _limit(prefix, maxChars);
+    final remainingForValue = (maxChars - limitedPrefix.length - suffix.length)
+        .clamp(0, maxChars)
+        .toInt();
+    final limitedValue = _limit(value, remainingForValue);
+    final remainingForSuffix =
+        (maxChars - limitedPrefix.length - limitedValue.length)
+            .clamp(0, maxChars)
+            .toInt();
+    final limitedSuffix = _limit(suffix, remainingForSuffix);
+    final fullText = '$limitedPrefix$limitedValue$limitedSuffix';
+    if (fullText.isEmpty) return;
+
+    var cursorX = _alignedX(element, fullText, fontSize, align);
+    final y = _dots(element['y']);
+    if (limitedPrefix.isNotEmpty) {
+      yield _text(
+        cursorX,
+        y,
+        _fontName(prefixFontSize, weight),
+        _fontMultiplier(prefixFontSize),
+        _fontMultiplier(prefixFontSize),
+        limitedPrefix,
+      );
+      cursorX += _estimatedTextWidthDots(limitedPrefix, prefixFontSize);
+    }
+    if (limitedValue.isNotEmpty) {
+      yield _text(
+        cursorX,
+        y,
+        _fontName(fontSize, weight),
+        _fontMultiplier(fontSize),
+        _fontMultiplier(fontSize),
+        limitedValue,
+      );
+      cursorX += _estimatedTextWidthDots(limitedValue, fontSize);
+    }
+    if (limitedSuffix.isNotEmpty) {
+      yield _text(
+        cursorX,
+        y,
+        _fontName(suffixFontSize, weight),
+        _fontMultiplier(suffixFontSize),
+        _fontMultiplier(suffixFontSize),
+        limitedSuffix,
+      );
+    }
+  }
+
+  String _fontName(num fontSize, String weight) {
+    if (fontSize >= 11 ||
+        weight == 'bold' ||
+        weight == '700' ||
+        weight == '800') {
+      return '3';
+    }
+    return '1';
+  }
+
+  int _fontMultiplier(num fontSize) => fontSize >= 13 ? 2 : 1;
+
+  int _estimatedTextWidthDots(String text, num fontSize) =>
+      (text.length * 8 * _fontMultiplier(fontSize)).round();
 
   String _weight(Object? value, String unit) {
     final parsed = num.tryParse(value?.toString() ?? '');
@@ -819,16 +972,22 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
     final width = _dots(element['width']);
     if (align == 'left') return x;
 
-    final multiplier = fontSize >= 13 ? 2 : 1;
-    final estimatedTextWidth = (text.length * 8 * multiplier).round();
+    final estimatedTextWidth = _estimatedTextWidthDots(text, fontSize);
     final spare = (width - estimatedTextWidth).clamp(0, width);
     if (align == 'right') return x + spare;
     return x + (spare ~/ 2);
   }
 
-  String? _imageBitmapTspl(Map element) {
+  _BitmapTspl? _imageBitmapTspl(Map element) {
     final path = element['imagePath']?.toString();
-    final encoded = element['imageBase64']?.toString();
+    var encoded = element['imageBase64']?.toString();
+    final dataUri =
+        element['imageDataUri']?.toString() ?? element['imageUrl']?.toString();
+    if ((encoded == null || encoded.isEmpty) &&
+        dataUri != null &&
+        dataUri.contains('base64,')) {
+      encoded = dataUri.substring(dataUri.indexOf('base64,') + 7);
+    }
     final List<int>? bytes;
     try {
       bytes = encoded != null && encoded.isNotEmpty
@@ -854,7 +1013,7 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
       interpolation: img.Interpolation.nearest,
     );
     final bytesPerRow = ((width + 7) ~/ 8);
-    final buffer = StringBuffer();
+    final bitmapBytes = <int>[];
     for (var row = 0; row < height; row++) {
       for (var byteIndex = 0; byteIndex < bytesPerRow; byteIndex++) {
         var value = 0;
@@ -862,17 +1021,20 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
           final col = byteIndex * 8 + bit;
           if (col >= width) continue;
           final pixel = resized.getPixel(col, row);
-          if (pixel.a < 128) continue;
+          if (pixel.a < 32) continue;
           final luminance =
               (pixel.r * 0.299) + (pixel.g * 0.587) + (pixel.b * 0.114);
-          if (luminance < 96) {
+          if (luminance < 235) {
             value |= 1 << (7 - bit);
           }
         }
-        buffer.write(value.toRadixString(16).padLeft(2, '0').toUpperCase());
+        bitmapBytes.add(value);
       }
     }
-    return 'BITMAP $x,$y,$bytesPerRow,$height,0,${buffer.toString()}';
+    return _BitmapTspl(
+      'BITMAP $x,$y,$bytesPerRow,$height,0,',
+      Uint8List.fromList(bitmapBytes),
+    );
   }
 
   num? _num(Object? value) {
@@ -913,8 +1075,18 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
 
   @visibleForTesting
   String debugTspl(PrintJob job) => _tspl(job);
+
+  @visibleForTesting
+  Uint8List debugTsplBytes(PrintJob job) => _tsplBytes(job);
 }
 
 extension on String {
   String ifEmpty(String fallback) => isEmpty ? fallback : this;
+}
+
+class _BitmapTspl {
+  const _BitmapTspl(this.prefix, this.data);
+
+  final String prefix;
+  final Uint8List data;
 }

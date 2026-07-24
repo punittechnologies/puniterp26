@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\NullableDecimal;
 use App\Models\Concerns\HasUuidPrimaryKey;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
@@ -16,10 +17,10 @@ class InwardSession extends Model
     {
         return [
             'entry_count' => 'integer',
-            'total_gross_weight' => 'decimal:6',
-            'total_tare_weight' => 'decimal:6',
-            'total_net_weight' => 'decimal:6',
-            'total_piece_quantity' => 'decimal:6',
+            'total_gross_weight' => NullableDecimal::class.':6',
+            'total_tare_weight' => NullableDecimal::class.':6',
+            'total_net_weight' => NullableDecimal::class.':6',
+            'total_piece_quantity' => NullableDecimal::class.':6',
             'metadata' => 'array',
             'started_at' => 'datetime',
             'ended_at' => 'datetime',

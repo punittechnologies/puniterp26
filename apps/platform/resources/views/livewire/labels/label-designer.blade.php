@@ -1,183 +1,367 @@
-<div class="grid gap-6 xl:grid-cols-[300px_1fr_320px]">
-    <aside class="rounded-lg border border-slate-200 bg-white p-5">
-        <h2 class="text-xl font-bold">Templates</h2>
-        <div class="mt-4 space-y-2">
-            @foreach ($templates as $template)
-                <a class="block rounded-md border border-slate-200 px-3 py-2 text-sm hover:border-blue-300" href="/labels/{{ $template->id }}">
-                    <span class="font-semibold">{{ $template->name }}</span>
-                    <span class="block text-slate-500">v{{ $template->active_version }} · {{ $template->scope }}</span>
-                </a>
-            @endforeach
+<div
+    class="label-studio"
+    x-data="labelDesigner(@entangle('templateJsonText').live, @entangle('widthMm').live, @entangle('heightMm').live)"
+    x-init="init()"
+>
+    <textarea class="hidden" x-model="templateJsonText" wire:model.live.debounce.350ms="templateJsonText"></textarea>
+
+    <section class="label-studio-hero">
+        <div>
+            <p class="admin-eyebrow">Label management</p>
+            <h2>Label Templates</h2>
+            <p>Create a reusable TVS/TSPL-ready label. Click a field, drag it on the label, resize it, and save.</p>
         </div>
+        <div class="label-studio-actions">
+            <a href="{{ route('admin.labels') }}" class="admin-btn admin-btn-ghost">New template</a>
+            <button type="button" wire:click="save" wire:loading.attr="disabled" wire:target="save" class="admin-btn admin-btn-primary label-save-button">
+                <span wire:loading.remove wire:target="save">Save Template</span>
+                <span wire:loading wire:target="save">Saving...</span>
+            </button>
+        </div>
+    </section>
 
-        <div class="mt-6 space-y-3">
-            <label class="block text-xs font-bold uppercase tracking-wide text-slate-500">Template name</label>
-            <input wire:model.live="name" class="w-full rounded-md border border-slate-300 px-3 py-2" placeholder="Template name">
+    @if ($statusMessage)
+        <div class="label-studio-status">{{ $statusMessage }}</div>
+    @endif
 
-            <label class="block text-xs font-bold uppercase tracking-wide text-slate-500">Template code</label>
-            <input wire:model.live="code" class="w-full rounded-md border border-slate-300 px-3 py-2" placeholder="Code">
+    <section class="label-template-strip">
+        <div class="label-template-strip__header">
+            <div>
+                <p class="admin-eyebrow">Saved templates</p>
+                <strong>Select an existing template to edit</strong>
+            </div>
+            <span>{{ $templates->count() }} active</span>
+        </div>
+        <div class="label-template-list">
+            @forelse ($templates as $template)
+                <a
+                    href="{{ route('admin.labels', ['template' => $template->id]) }}"
+                    class="label-template-card {{ $templateId === $template->id ? 'is-active' : '' }}"
+                >
+                    <strong>{{ $template->name }}</strong>
+                    <span>{{ number_format((float) $template->width_mm, 0) }} x {{ number_format((float) $template->height_mm, 0) }} mm · v{{ $template->active_version }}</span>
+                </a>
+            @empty
+                <div class="label-template-empty">No templates yet. Create the first one below.</div>
+            @endforelse
+        </div>
+    </section>
 
-            <label class="block text-xs font-bold uppercase tracking-wide text-slate-500">Use as</label>
-            <select wire:model.live="scope" class="w-full rounded-md border border-slate-300 px-3 py-2">
-                <option value="tenant">Tenant default</option>
-                <option value="product">Product default</option>
-                <option value="variant">Variant default</option>
+    <section class="label-studio-topbar">
+        <label>
+            <span>Template name</span>
+            <input wire:model.live.debounce.300ms="name" placeholder="Example: 75mm packing label">
+        </label>
+        <label>
+            <span>Template code</span>
+            <input wire:model.live.debounce.300ms="code" placeholder="Example: PACKING-75">
+        </label>
+        <label>
+            <span>Use for</span>
+            <select wire:model.live="scope">
+                <option value="tenant">All products / tenant default</option>
+                <option value="product">Product default later</option>
+                <option value="variant">Product detail default later</option>
             </select>
-
-            <label class="block text-xs font-bold uppercase tracking-wide text-slate-500">Label size</label>
-            <select wire:model.live="size" class="w-full rounded-md border border-slate-300 px-3 py-2">
+        </label>
+        <label>
+            <span>Label size</span>
+            <select wire:model.live="size" x-on:change="$nextTick(() => syncSize({{ '$wire.widthMm' }}, {{ '$wire.heightMm' }}))">
                 @foreach ($labelSizes as $sizeKey => $sizeLabel)
                     <option value="{{ $sizeKey }}">{{ $sizeLabel }}</option>
                 @endforeach
             </select>
-
-            <label class="block text-xs font-bold uppercase tracking-wide text-slate-500">Font size</label>
-            <select wire:model.live="fontSize" class="w-full rounded-md border border-slate-300 px-3 py-2">
-                @foreach ([7, 8, 9, 10, 11, 12, 14, 16] as $sizeOption)
-                    <option value="{{ $sizeOption }}">{{ $sizeOption }} px</option>
-                @endforeach
-            </select>
-
-            <label class="flex items-center gap-2 text-sm font-semibold">
-                <input type="checkbox" wire:model.live="isDefault">
-                Default template
-            </label>
-
-            <button wire:click="save" class="w-full rounded-md bg-blue-700 px-4 py-3 font-bold text-white">Save Template</button>
-
-            @if ($statusMessage)
-                <div class="rounded-md bg-green-50 p-3 text-sm font-semibold text-green-700">{{ $statusMessage }}</div>
-            @endif
-
-            @if ($templateId)
-                <button wire:click="archive" class="w-full rounded-md border border-red-200 px-4 py-3 font-bold text-red-700">Archive</button>
-            @endif
-        </div>
-    </aside>
-
-    <section class="rounded-lg border border-slate-200 bg-white p-5">
-        <div class="flex flex-wrap items-start justify-between gap-4">
-            <div>
-                <p class="text-sm font-bold uppercase tracking-[0.18em] text-blue-700">Simple label builder</p>
-                <h1 class="mt-1 text-2xl font-black text-slate-950">Header · Content · Footer</h1>
-                <p class="mt-1 text-sm text-slate-500">No complex drag/drop. Select fields, move them up/down, preview, save, then the app prints this template.</p>
-            </div>
-            <div class="rounded-md bg-blue-50 px-4 py-3 text-sm font-bold text-blue-800">
-                Barcode is fixed at bottom
-            </div>
-        </div>
-
-        <div class="mt-5 grid gap-5 lg:grid-cols-[1fr_340px]">
-            <div class="space-y-5">
-                <div class="rounded-lg border border-slate-200 p-4">
-                    <h2 class="text-lg font-black">Header</h2>
-                    <p class="text-sm text-slate-500">Write company details line by line. Example: company name, phone, email, GST, location.</p>
-                    <textarea wire:model.live.debounce.400ms="headerText" rows="4" class="mt-3 w-full rounded-md border border-slate-300 p-3"></textarea>
-                </div>
-
-                <div class="rounded-lg border border-slate-200 p-4">
-                    <div class="flex items-center justify-between gap-3">
-                        <div>
-                            <h2 class="text-lg font-black">Content Fields</h2>
-                            <p class="text-sm text-slate-500">Choose product name, product detail fields and weight values.</p>
-                        </div>
-                        <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">{{ count($selectedBindings) }} selected</span>
-                    </div>
-
-                    <div class="mt-4 grid gap-2 md:grid-cols-2">
-                        @foreach ($bindings as $binding)
-                            @continue($binding['key'] !== 'product.name' && ! str($binding['key'])->startsWith('dynamic.'))
-                            <label class="flex items-center gap-3 rounded-md border border-slate-200 px-3 py-2 text-sm font-semibold">
-                                <input
-                                    type="checkbox"
-                                    wire:click="toggleBinding('{{ $binding['key'] }}')"
-                                    @checked(in_array($binding['key'], $selectedBindings, true))
-                                >
-                                <span>{{ $binding['label'] }}</span>
-                            </label>
-                        @endforeach
-                    </div>
-
-                    <div class="mt-4 rounded-md bg-slate-50 p-3">
-                        <p class="text-xs font-bold uppercase tracking-wide text-slate-500">Print weights</p>
-                        <div class="mt-2 grid gap-2 sm:grid-cols-4">
-                            <label class="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" wire:model.live="printGross"> Gross</label>
-                            <label class="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" wire:model.live="printTare"> Tare</label>
-                            <label class="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" wire:model.live="printNet"> Net</label>
-                            <label class="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" wire:model.live="printPieces"> Pieces</label>
-                        </div>
-                    </div>
-
-                    <div class="mt-4">
-                        <p class="text-xs font-bold uppercase tracking-wide text-slate-500">Selected order</p>
-                        <div class="mt-2 space-y-2">
-                            @foreach ($selectedBindings as $bindingKey)
-                                <div class="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
-                                    <span class="flex-1 text-sm font-bold">{{ $selectedBindingLabels[$bindingKey] ?? $bindingKey }}</span>
-                                    <button type="button" wire:click="moveBinding('{{ $bindingKey }}', -1)" class="rounded-md border px-2 py-1 text-xs font-bold">Up</button>
-                                    <button type="button" wire:click="moveBinding('{{ $bindingKey }}', 1)" class="rounded-md border px-2 py-1 text-xs font-bold">Down</button>
-                                </div>
-                            @endforeach
-                        </div>
-                    </div>
-                </div>
-
-                <div class="rounded-lg border border-slate-200 p-4">
-                    <h2 class="text-lg font-black">Footer</h2>
-                    <p class="text-sm text-slate-500">Optional note, address line, thank you text or batch footer.</p>
-                    <textarea wire:model.live.debounce.400ms="footerText" rows="3" class="mt-3 w-full rounded-md border border-slate-300 p-3"></textarea>
-                </div>
-            </div>
-
-            <div class="rounded-lg border border-blue-100 bg-blue-50 p-4">
-                <h2 class="text-lg font-black text-blue-950">Live Preview</h2>
-                <div class="mt-4 overflow-auto rounded-md bg-slate-100 p-4">
-                    @php
-                        $scale = 3.2;
-                        $elements = collect($templateJson['elements'] ?? [])->sortBy('layerOrder');
-                    @endphp
-                    <div
-                        class="relative inline-block bg-white shadow"
-                        style="width: {{ (float) $widthMm * $scale }}px; height: {{ (float) $heightMm * $scale }}px; border: 2px solid #2563eb;"
-                    >
-                        @foreach ($elements as $element)
-                            @php
-                                $type = $element['type'] ?? 'text';
-                                $label = match ($type) {
-                                    'barcode' => '||||| BARCODE |||||',
-                                    default => ($element['prefix'] ?? '').($element['text'] ?? $selectedBindingLabels[$element['bindingKey'] ?? ''] ?? $element['bindingKey'] ?? 'Text').($element['suffix'] ?? ''),
-                                };
-                                $fontSize = max(8, (float) data_get($element, 'style.fontSize', 9) * $scale / 2.1);
-                            @endphp
-                            <div
-                                class="absolute box-border overflow-hidden {{ $type === 'barcode' ? 'grid place-items-center border border-slate-900 bg-slate-50 font-mono text-slate-900' : '' }}"
-                                style="
-                                    left: {{ (float) ($element['x'] ?? 0) * $scale }}px;
-                                    top: {{ (float) ($element['y'] ?? 0) * $scale }}px;
-                                    width: {{ (float) ($element['width'] ?? 30) * $scale }}px;
-                                    height: {{ (float) ($element['height'] ?? 8) * $scale }}px;
-                                    font-family: Arial, sans-serif;
-                                    font-size: {{ $fontSize }}px;
-                                    font-weight: {{ data_get($element, 'style.fontWeight', '600') }};
-                                    text-align: {{ data_get($element, 'style.align', 'left') }};
-                                    color: #0f172a;
-                                    padding: 1px 3px;
-                                "
-                            >{{ $label }}</div>
-                        @endforeach
-                    </div>
-                </div>
-
-                <h2 class="mt-5 text-lg font-black text-blue-950">Warnings</h2>
-                @if (count($warnings) === 0)
-                    <p class="mt-2 rounded-md bg-green-50 p-3 text-sm font-bold text-green-700">No warnings.</p>
-                @endif
-                <ul class="mt-2 space-y-2 text-sm text-amber-700">
-                    @foreach ($warnings as $warning)
-                        <li class="rounded-md bg-amber-50 p-2">{{ $warning['type'] ?? 'warning' }}</li>
-                    @endforeach
-                </ul>
-            </div>
-        </div>
+        </label>
+        <label>
+            <span>Width mm</span>
+            <input type="number" min="20" max="300" step="1" wire:model.live.debounce.300ms="widthMm" x-on:change="$nextTick(() => syncSize({{ '$wire.widthMm' }}, {{ '$wire.heightMm' }}))">
+        </label>
+        <label>
+            <span>Height mm</span>
+            <input type="number" min="20" max="300" step="1" wire:model.live.debounce.300ms="heightMm" x-on:change="$nextTick(() => syncSize({{ '$wire.widthMm' }}, {{ '$wire.heightMm' }}))">
+        </label>
+        <label class="label-check">
+            <input type="checkbox" wire:model.live="isDefault">
+            <span>Make default</span>
+        </label>
     </section>
+
+    <div class="label-studio-grid">
+        <aside class="label-studio-panel label-studio-panel--left">
+            <div class="label-panel-title">
+                <span>1</span>
+                <div>
+                    <h3>Content Fields</h3>
+                    <p>Click to add on label</p>
+                </div>
+            </div>
+
+            <div class="label-tool-group">
+                <button type="button" x-on:click="addBinding('company.name', 'Company name')">Company name</button>
+                <button type="button" x-on:click="addBinding('product.name', 'Product name')">Product name</button>
+                <button type="button" x-on:click="addBinding('serial.number', 'Sr. No')">Sr. No</button>
+                <button type="button" x-on:click="addBinding('date.current', 'Date')">Date</button>
+                <button type="button" x-on:click="addBinding('time.current', 'Time')">Time</button>
+            </div>
+
+            <div class="label-tool-section">
+                <h4>Weights</h4>
+                <div class="label-tool-group">
+                    <button type="button" x-on:click="addBinding('weight.gross', 'Gross weight')">Gross</button>
+                    <button type="button" x-on:click="addBinding('weight.tare', 'Tare weight')">Tare</button>
+                    <button type="button" x-on:click="addBinding('weight.net', 'Net weight')">Net</button>
+                    <button type="button" x-on:click="addBinding('pieces.quantity', 'Pieces')">Pieces</button>
+                </div>
+            </div>
+
+            <div class="label-tool-section">
+                <h4>Product Details</h4>
+                <div class="label-tool-group label-tool-group--scroll">
+                    @foreach ($bindings as $binding)
+                        @php
+                            $key = $binding['key'];
+                            $isProductDetail = str($key)->startsWith('dynamic.product.') || str($key)->startsWith('dynamic.product_variant.');
+                        @endphp
+                        @continue(! $isProductDetail)
+                        <button type="button" x-on:click="addBinding(@js($key), @js($binding['label']))">
+                            {{ $binding['label'] }}
+                        </button>
+                    @endforeach
+                </div>
+            </div>
+
+            <div class="label-tool-section">
+                <h4>Custom</h4>
+                <div class="label-tool-group">
+                    <button type="button" x-on:click="addText()">Text box</button>
+                    <button type="button" x-on:click="addLine()">Line</button>
+                    <button type="button" x-on:click="addRect()">Rectangle</button>
+                </div>
+                <div class="label-upload-box">
+                    <label>
+                        <span>Upload logo / image</span>
+                        <input type="file" wire:model="imageUpload" accept="image/*">
+                    </label>
+                    <button type="button" wire:click="addUploadedImage" wire:loading.attr="disabled">
+                        Add image
+                    </button>
+                    <small>Images are saved in the template JSON and printed by supported new APK builds.</small>
+                </div>
+            </div>
+
+            <div class="label-barcode-note">
+                <strong>Barcode is mandatory</strong>
+                <span>You can move and resize it, but it cannot be removed.</span>
+            </div>
+        </aside>
+
+        <main class="label-studio-canvas-card">
+            <div class="label-canvas-header">
+                <div>
+                    <p class="admin-eyebrow">2 · Live preview</p>
+                    <h3><span></span> Actual label canvas</h3>
+                </div>
+                <div class="label-canvas-tools">
+                    <button type="button" x-on:click="undo()" x-bind:disabled="history.length < 2">Undo</button>
+                    <button type="button" x-on:click="redo()" x-bind:disabled="!future.length">Redo</button>
+                    <button type="button" x-on:click="zoomOut()">Zoom -</button>
+                    <button type="button" x-on:click="zoomIn()">Zoom +</button>
+                    <button type="button" x-on:click="duplicate()">Duplicate</button>
+                </div>
+            </div>
+            <p class="label-canvas-help">Click one field, then drag it. Only the selected field moves. Resize from the blue handles.</p>
+            <div class="label-canvas-wrap">
+                <div id="label-stage" wire:ignore></div>
+            </div>
+            <div class="label-warning-row" x-show="warnings.length">
+                <template x-for="warning in warnings" :key="warning.type + (warning.element || '')">
+                    <span x-text="warning.type"></span>
+                </template>
+            </div>
+        </main>
+
+        <aside class="label-studio-panel label-studio-panel--right">
+            <div class="label-panel-title">
+                <span>3</span>
+                <div>
+                    <h3>Format Field</h3>
+                    <p>Style selected content</p>
+                </div>
+            </div>
+
+            <div class="label-empty-selection" x-show="!selectedElement">
+                <strong>Select a field</strong>
+                <p>Click anything on the label preview to edit text, size, position, font and alignment.</p>
+            </div>
+
+            <div class="label-format-form" x-show="selectedElement">
+                <div class="label-selected-name">
+                    <span>Selected</span>
+                    <strong x-text="selectedElement?.type === 'barcode' ? 'Mandatory barcode' : (selectedElement?.bindingKey || selectedElement?.text || selectedElement?.type)"></strong>
+                </div>
+
+                <label x-show="selectedElement?.type === 'text'">
+                    <span>Text</span>
+                    <input x-model="selectedElement.text" x-on:change="updateSelected('text', selectedElement.text)">
+                </label>
+
+                <div class="label-binding-note" x-show="selectedElement?.type === 'binding_text'">
+                    <strong>Linked field stays connected</strong>
+                    <span>Binding: <code x-text="selectedElement?.bindingKey"></code></span>
+                    <small>Use Prefix for the printed caption. Example: Prefix “Color: ” + value “Red” prints “Color: Red”.</small>
+                </div>
+
+                <div class="label-prefix-focus" x-show="!['barcode','image','rectangle','line'].includes(selectedElement?.type)">
+                    <label>
+                        <span>Prefix / printed caption</span>
+                        <input placeholder="Example: Color: " x-model="selectedElement.prefix" x-on:change="updateSelected('prefix', selectedElement.prefix || '')">
+                    </label>
+                    <label>
+                        <span>Suffix / printed unit</span>
+                        <input placeholder="Example: kg, pcs, mm" x-model="selectedElement.suffix" x-on:change="updateSelected('suffix', selectedElement.suffix || '')">
+                    </label>
+                    <p x-show="selectedElement?.type === 'binding_text'" class="label-preview-value-note">
+                        Preview uses sample value: <strong x-text="selectedElement?.previewValue || previewValueForBinding(selectedElement?.bindingKey, selectedElement?.text)"></strong>
+                    </p>
+                </div>
+
+                <div class="label-field-editor-title">
+                    <strong>Move selected field</strong>
+                    <span>For text, use font size instead of stretching a box.</span>
+                </div>
+
+                <div class="label-format-grid">
+                    <label>
+                        <span>X mm</span>
+                        <input type="number" step="1" x-model.number="selectedElement.x" x-on:change="updateSelected('x', selectedElement.x)">
+                    </label>
+                    <label>
+                        <span>Y mm</span>
+                        <input type="number" step="1" x-model.number="selectedElement.y" x-on:change="updateSelected('y', selectedElement.y)">
+                    </label>
+                </div>
+
+                <div class="label-format-grid" x-show="['barcode','image','rectangle','line'].includes(selectedElement?.type)">
+                    <label>
+                        <span>Width</span>
+                        <input type="number" step="1" x-model.number="selectedElement.width" x-on:change="updateSelected('width', selectedElement.width)">
+                    </label>
+                    <label>
+                        <span>Height</span>
+                        <input type="number" step="1" x-model.number="selectedElement.height" x-on:change="updateSelected('height', selectedElement.height)">
+                    </label>
+                </div>
+
+                <details class="label-text-width-details" x-show="!['barcode','image','rectangle','line'].includes(selectedElement?.type)">
+                    <summary>Advanced text line width</summary>
+                    <div class="label-format-grid">
+                        <label>
+                            <span>Line width</span>
+                            <input type="number" step="1" x-model.number="selectedElement.width" x-on:change="updateSelected('width', selectedElement.width)">
+                        </label>
+                        <label>
+                            <span>Line height</span>
+                            <input type="number" step="1" x-model.number="selectedElement.height" x-on:change="updateSelected('height', selectedElement.height)">
+                        </label>
+                    </div>
+                </details>
+
+                <div class="label-format-buttons label-format-buttons--move">
+                    <button type="button" x-on:click="nudge(0, -1)">Up</button>
+                    <button type="button" x-on:click="nudge(0, 1)">Down</button>
+                    <button type="button" x-on:click="nudge(-1, 0)">Left</button>
+                    <button type="button" x-on:click="nudge(1, 0)">Right</button>
+                </div>
+
+                <div class="label-format-buttons label-format-buttons--size" x-show="['barcode','image','rectangle','line'].includes(selectedElement?.type)">
+                    <button type="button" x-on:click="resizeSelected(2, 0)">Wider</button>
+                    <button type="button" x-on:click="resizeSelected(-2, 0)">Narrower</button>
+                    <button type="button" x-on:click="resizeSelected(0, 2)">Taller</button>
+                    <button type="button" x-on:click="resizeSelected(0, -2)">Shorter</button>
+                </div>
+
+                <div class="label-format-buttons">
+                    <button type="button" x-on:click="rotateSelected(-5)">Rotate -</button>
+                    <button type="button" x-on:click="rotateSelected(5)">Rotate +</button>
+                    <button type="button" x-on:click="layerSelected(-1)">Send back</button>
+                    <button type="button" x-on:click="layerSelected(1)">Bring front</button>
+                </div>
+
+                <label x-show="!['barcode','image','rectangle','line'].includes(selectedElement?.type)">
+                    <span>Font family</span>
+                    <select x-model="selectedElement.style.fontFamily" x-on:change="updateSelected('style.fontFamily', selectedElement.style.fontFamily)">
+                        @foreach ($fontFamilies as $family)
+                            <option value="{{ $family }}">{{ $family }}</option>
+                        @endforeach
+                    </select>
+                </label>
+
+                <div class="label-format-grid" x-show="!['barcode','image','rectangle','line'].includes(selectedElement?.type)">
+                    <label>
+                        <span>Font size</span>
+                        <input type="number" min="4" max="72" step="1" x-model.number="selectedElement.style.fontSize" x-on:change="updateSelected('style.fontSize', selectedElement.style.fontSize)">
+                    </label>
+                    <label>
+                        <span>Weight</span>
+                        <select x-model="selectedElement.style.fontWeight" x-on:change="updateSelected('style.fontWeight', selectedElement.style.fontWeight)">
+                            @foreach ($fontWeights as $value => $label)
+                                <option value="{{ $value }}">{{ $label }}</option>
+                            @endforeach
+                        </select>
+                    </label>
+                </div>
+
+                <div class="label-format-grid" x-show="!['barcode','image','rectangle','line'].includes(selectedElement?.type)">
+                    <label>
+                        <span>Prefix size</span>
+                        <input type="number" min="4" max="72" step="1" x-model.number="selectedElement.style.prefixFontSize" x-on:change="updateSelected('style.prefixFontSize', selectedElement.style.prefixFontSize || selectedElement.style.fontSize)">
+                    </label>
+                    <label>
+                        <span>Suffix size</span>
+                        <input type="number" min="4" max="72" step="1" x-model.number="selectedElement.style.suffixFontSize" x-on:change="updateSelected('style.suffixFontSize', selectedElement.style.suffixFontSize || selectedElement.style.fontSize)">
+                    </label>
+                </div>
+
+                <div class="label-format-buttons" x-show="!['barcode','image','rectangle','line'].includes(selectedElement?.type)">
+                    <button type="button" x-on:click="changeFontSize(-1)">Font -</button>
+                    <button type="button" x-on:click="changeFontSize(1)">Font +</button>
+                    <button type="button" x-on:click="fitText()">Fit text</button>
+                    <button type="button" x-on:click="updateSelected('style.fontWeight', '800')">Max bold</button>
+                </div>
+
+                <div class="label-format-grid" x-show="!['barcode','image','rectangle','line'].includes(selectedElement?.type)">
+                    <label>
+                        <span>Style</span>
+                        <select x-model="selectedElement.style.fontStyle" x-on:change="updateSelected('style.fontStyle', selectedElement.style.fontStyle)">
+                            <option value="normal">Normal</option>
+                            <option value="italic">Italic</option>
+                        </select>
+                    </label>
+                    <label>
+                        <span>Align</span>
+                        <select x-model="selectedElement.style.align" x-on:change="updateSelected('style.align', selectedElement.style.align)">
+                            <option value="left">Left</option>
+                            <option value="center">Center</option>
+                            <option value="right">Right</option>
+                            <option value="justify">Justify</option>
+                        </select>
+                    </label>
+                </div>
+
+                <label>
+                    <span>Rotation</span>
+                    <input type="number" step="1" x-model.number="selectedElement.rotation" x-on:change="updateSelected('rotation', selectedElement.rotation)">
+                </label>
+
+                <button type="button" class="label-delete-button" x-on:click="remove()" x-bind:disabled="selectedElement?.type === 'barcode'">
+                    Delete selected
+                </button>
+            </div>
+        </aside>
+    </div>
+
+    <details class="label-json-details">
+        <summary>Developer JSON preview</summary>
+        <pre x-text="jsonText"></pre>
+    </details>
 </div>

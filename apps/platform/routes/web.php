@@ -157,6 +157,7 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/app-users', [AdminPanelController::class, 'appUsers'])->name('admin.app-users');
     Route::post('/app-users', [AdminPanelController::class, 'appUserStore'])->name('admin.app-users.store');
     Route::patch('/app-users/{user}/status', [AdminPanelController::class, 'appUserStatus'])->name('admin.app-users.status');
+    Route::delete('/app-users/{user}', [AdminPanelController::class, 'userDestroy'])->name('admin.app-users.destroy');
     Route::delete('/admin/users/{user}', [AdminPanelController::class, 'userDestroy'])->name('admin.users.destroy');
     Route::get('/superadmin/onboarding', [AdminPanelController::class, 'superAdminOnboarding'])->name('admin.superadmin.onboarding');
     Route::post('/superadmin/onboarding', [AdminPanelController::class, 'superAdminOnboardingSave'])->name('admin.superadmin.onboarding.save');
@@ -170,5 +171,7 @@ Route::middleware('auth')->group(function (): void {
         return view('product-details.index', ['title' => 'Product Details']);
     })->name('admin.product-details');
 
-    Route::get('/labels/{template?}', fn () => redirect()->route('admin.tenant-settings'))->name('admin.labels');
+    Route::get('/labels/{template?}', function (?string $template = null) {
+        return view('labels.index', ['title' => 'Label Templates', 'template' => $template]);
+    })->name('admin.labels');
 });

@@ -500,12 +500,6 @@ class _ModuleGrid extends StatelessWidget {
           icon: Icons.category_outlined,
         ),
         _ModuleTile(
-          title: 'Labels',
-          subtitle: 'Offline label JSON preview',
-          route: '/labels',
-          icon: Icons.qr_code_2_outlined,
-        ),
-        _ModuleTile(
           title: 'Inventory',
           subtitle: 'Ledger and current balance',
           route: '/inventory',

@@ -6,6 +6,7 @@
             ['Dashboard', route('admin.dashboard'), 'dashboard.view'],
             ['Products', route('admin.products'), 'products.view'],
             ['Product Details', route('admin.product-details'), 'products.view'],
+            ['Label Templates', route('admin.labels'), 'label_templates.view'],
             ['Inward Report', route('admin.inward-report'), 'reports.view'],
             ['Dispatch Report / Packing List', route('admin.dispatch-report'), 'reports.view'],
         ],
@@ -72,7 +73,14 @@
                         <p>{{ $group }}</p>
                         @foreach ($items as [$label, $href, $permission])
                             @if (! $permission || ($permission === 'superadmin.only' ? $user?->isSuperAdmin() : $user?->hasPermission($permission)))
-                                <a href="{{ $href }}" @class(['active' => request()->fullUrlIs($href) || request()->is(trim(parse_url($href, PHP_URL_PATH), '/').'*')])>
+                                @php
+                                    $initial = collect(explode(' ', str_replace(['/', '&'], ' ', $label)))
+                                        ->filter()
+                                        ->map(fn ($word) => mb_substr($word, 0, 1))
+                                        ->take(2)
+                                        ->implode('');
+                                @endphp
+                                <a href="{{ $href }}" data-initial="{{ strtoupper($initial) }}" @class(['active' => request()->fullUrlIs($href) || request()->is(trim(parse_url($href, PHP_URL_PATH), '/').'*')])>
                                     {{ $label }}
                                 </a>
                             @endif

@@ -2,6 +2,7 @@
 
 namespace App\Models\Labeling;
 
+use App\Casts\NullableDecimal;
 use App\Models\Concerns\HasUuidPrimaryKey;
 use App\Models\ProductConfiguration\Product;
 use App\Models\ProductConfiguration\ProductVariant;
@@ -19,8 +20,8 @@ class LabelTemplate extends Model
     protected function casts(): array
     {
         return [
-            'width_mm' => 'decimal:2',
-            'height_mm' => 'decimal:2',
+            'width_mm' => NullableDecimal::class.':2',
+            'height_mm' => NullableDecimal::class.':2',
             'is_custom_size' => 'boolean',
             'is_default' => 'boolean',
             'is_active' => 'boolean',

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\NullableDecimal;
 use App\Models\Concerns\HasUuidPrimaryKey;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
@@ -17,8 +18,8 @@ class Dispatch extends Model
         return [
             'customer_snapshot' => 'array',
             'metadata' => 'array',
-            'total_weight' => 'decimal:6',
-            'total_pieces' => 'decimal:6',
+            'total_weight' => NullableDecimal::class.':6',
+            'total_pieces' => NullableDecimal::class.':6',
             'confirmed_at' => 'datetime',
         ];
     }

@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
 import 'package:punit_tablet/services/devices/bluetooth_thermal_printer_adapter.dart';
 import 'package:punit_tablet/services/devices/printer_adapter.dart';
 import 'package:punit_tablet/services/devices/thermal_label_renderer.dart';
@@ -91,4 +92,65 @@ void main() {
     expect(tspl, contains(',"128",'));
     expect(tspl, contains(',0,0,2,2,'));
   });
+
+  test('TSPL image element is emitted as raw bitmap bytes', () {
+    final image = img.Image(width: 8, height: 8);
+    img.fill(image, color: img.ColorRgb8(255, 255, 255));
+    for (var index = 0; index < 8; index++) {
+      image.setPixel(index, index, img.ColorRgb8(0, 0, 0));
+    }
+
+    final bytes = BluetoothThermalPrinterAdapter().debugTsplBytes(
+      PrintJob(
+        jobId: 'job-image',
+        template: {
+          'widthMm': 75,
+          'heightMm': 75,
+          'elements': [
+            {
+              'key': 'logo',
+              'type': 'image',
+              'x': 2,
+              'y': 2,
+              'width': 1,
+              'height': 1,
+              'layerOrder': 1,
+              'imageBase64': base64Encode(img.encodePng(image)),
+            },
+            {
+              'key': 'barcode',
+              'type': 'barcode',
+              'x': 5,
+              'y': 52,
+              'width': 65,
+              'height': 17,
+              'layerOrder': 2,
+            },
+          ],
+        },
+        data: const {'barcode_value': 'PHK123'},
+      ),
+    );
+
+    final marker = ascii.encode('BITMAP 16,16,1,8,0,');
+    final start = _indexOfBytes(bytes, marker);
+    expect(start, isNonNegative);
+    final bitmapStart = start + marker.length;
+    expect(bytes.sublist(bitmapStart, bitmapStart + 8), isNot(contains(0x30)));
+    expect(bytes.sublist(bitmapStart, bitmapStart + 8), contains(0x80));
+  });
+}
+
+int _indexOfBytes(List<int> haystack, List<int> needle) {
+  for (var index = 0; index <= haystack.length - needle.length; index++) {
+    var found = true;
+    for (var offset = 0; offset < needle.length; offset++) {
+      if (haystack[index + offset] != needle[offset]) {
+        found = false;
+        break;
+      }
+    }
+    if (found) return index;
+  }
+  return -1;
 }

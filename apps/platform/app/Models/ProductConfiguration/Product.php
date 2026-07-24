@@ -2,6 +2,7 @@
 
 namespace App\Models\ProductConfiguration;
 
+use App\Casts\NullableDecimal;
 use App\Models\Concerns\HasUuidPrimaryKey;
 use App\Models\Warehouse;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -19,14 +20,14 @@ class Product extends Model
     {
         return [
             'is_active' => 'boolean',
-            'default_tare_weight' => 'decimal:3',
-            'minimum_weight' => 'decimal:3',
-            'maximum_weight' => 'decimal:3',
-            'target_weight' => 'decimal:3',
+            'default_tare_weight' => NullableDecimal::class.':3',
+            'minimum_weight' => NullableDecimal::class.':3',
+            'maximum_weight' => NullableDecimal::class.':3',
+            'target_weight' => NullableDecimal::class.':3',
             'weight_decimal_precision' => 'integer',
             'stability_duration_ms' => 'integer',
-            'stability_tolerance' => 'decimal:3',
-            'reset_threshold' => 'decimal:3',
+            'stability_tolerance' => NullableDecimal::class.':3',
+            'reset_threshold' => NullableDecimal::class.':3',
             'auto_print_enabled' => 'boolean',
             'manual_print_enabled' => 'boolean',
             'duplicate_print_prevention_enabled' => 'boolean',

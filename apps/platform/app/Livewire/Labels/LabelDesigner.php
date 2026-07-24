@@ -8,9 +8,13 @@ use App\Domain\Labels\Services\LabelTemplateValidator;
 use App\Models\Labeling\LabelTemplate;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Component;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
+use Livewire\WithFileUploads;
 
 class LabelDesigner extends Component
 {
+    use WithFileUploads;
+
     public ?string $templateId = null;
 
     public string $name = 'New Label Template';
@@ -57,6 +61,8 @@ class LabelDesigner extends Component
 
     public int $fontSize = 9;
 
+    public ?TemporaryUploadedFile $imageUpload = null;
+
     public function mount(?string $template = null): void
     {
         if ($template) {
@@ -69,14 +75,19 @@ class LabelDesigner extends Component
             $this->isDefault = $model->is_default;
             $this->widthMm = (float) $model->width_mm;
             $this->heightMm = (float) $model->height_mm;
+            $this->size = $this->inferSize($this->widthMm, $this->heightMm);
             $this->templateJson = $model->template_json;
             $this->warnings = $model->warnings ?? [];
             $this->loadStructuredSettings();
+            $this->templateJsonText = json_encode($this->templateJson, JSON_PRETTY_PRINT);
+            $this->refreshWarnings();
+
+            return;
         } else {
             $this->templateJson = $this->defaultJson();
         }
 
-        $this->rebuildStructuredTemplate();
+        $this->ensureMandatoryBarcode();
         $this->templateJsonText = json_encode($this->templateJson, JSON_PRETTY_PRINT);
         $this->refreshWarnings();
     }
@@ -85,7 +96,8 @@ class LabelDesigner extends Component
     {
         $tenantId = Auth::user()?->tenant_id;
         abort_unless($tenantId, 403);
-        $this->rebuildStructuredTemplate();
+        $this->syncTemplateFromText();
+        $this->ensureMandatoryBarcode();
         $this->templateJson['widthMm'] = $this->widthMm;
         $this->templateJson['heightMm'] = $this->heightMm;
         $this->templateJsonText = json_encode($this->templateJson, JSON_PRETTY_PRINT);
@@ -149,8 +161,8 @@ class LabelDesigner extends Component
     public function updatedSize(string $size): void
     {
         if ($size === '50x75') {
-            $this->widthMm = 50;
-            $this->heightMm = 75;
+            $this->widthMm = 75;
+            $this->heightMm = 50;
         }
 
         if ($size === '75x75') {
@@ -173,7 +185,19 @@ class LabelDesigner extends Component
             $this->heightMm = 150;
         }
 
-        $this->rebuildStructuredTemplate();
+        $this->resizeCanvas();
+    }
+
+    public function updatedWidthMm(): void
+    {
+        $this->size = 'custom';
+        $this->resizeCanvas();
+    }
+
+    public function updatedHeightMm(): void
+    {
+        $this->size = 'custom';
+        $this->resizeCanvas();
     }
 
     public function updatedHeaderText(): void
@@ -274,6 +298,11 @@ class LabelDesigner extends Component
         $this->addElement(['type' => 'text', 'text' => 'Static text', 'width' => 35, 'height' => 8]);
     }
 
+    public function addStaticText(string $text = 'Custom text'): void
+    {
+        $this->addElement(['type' => 'text', 'text' => $text, 'width' => 45, 'height' => 8]);
+    }
+
     public function addProductField(): void
     {
         $this->addBindingField();
@@ -282,6 +311,12 @@ class LabelDesigner extends Component
     public function addBindingField(): void
     {
         $this->addElement(['type' => 'binding_text', 'bindingKey' => $this->selectedBindingKey, 'width' => 42, 'height' => 8]);
+    }
+
+    public function addBinding(string $bindingKey): void
+    {
+        $this->selectedBindingKey = $bindingKey;
+        $this->addElement(['type' => 'binding_text', 'bindingKey' => $bindingKey, 'width' => 46, 'height' => 8]);
     }
 
     public function addNetWeight(): void
@@ -302,9 +337,42 @@ class LabelDesigner extends Component
         $this->addElement(['type' => 'barcode', 'bindingKey' => 'barcode.value', 'width' => 45, 'height' => 16]);
     }
 
+    public function addLine(): void
+    {
+        $this->addElement(['type' => 'line', 'width' => min(45, $this->widthMm - 8), 'height' => 1]);
+    }
+
     public function addRectangle(): void
     {
         $this->addElement(['type' => 'rectangle', 'width' => 30, 'height' => 15]);
+    }
+
+    public function addUploadedImage(): void
+    {
+        $this->validate([
+            'imageUpload' => ['required', 'image', 'max:2048'],
+        ]);
+
+        $path = $this->imageUpload?->store('label-images', 'public');
+
+        if (! $path) {
+            return;
+        }
+
+        $mime = $this->imageUpload->getMimeType() ?: 'image/png';
+        $encoded = base64_encode((string) file_get_contents($this->imageUpload->getRealPath()));
+
+        $this->addElement([
+            'type' => 'image',
+            'imagePath' => $path,
+            'imageUrl' => asset('storage/'.$path),
+            'imageBase64' => $encoded,
+            'imageMime' => $mime,
+            'imageDataUri' => 'data:'.$mime.';base64,'.$encoded,
+            'width' => min(24, $this->widthMm - 8),
+            'height' => 14,
+        ]);
+        $this->imageUpload = null;
     }
 
     public function duplicateLast(): void
@@ -351,6 +419,12 @@ class LabelDesigner extends Component
             return;
         }
 
+        if ($this->selectedElementKey === 'barcode') {
+            $this->statusMessage = 'Barcode is mandatory and cannot be deleted. You can move or resize it.';
+
+            return;
+        }
+
         $this->syncTemplateFromText();
         $this->templateJson['elements'] = collect($this->templateJson['elements'])
             ->reject(fn (array $element) => ($element['key'] ?? null) === $this->selectedElementKey)
@@ -391,7 +465,7 @@ class LabelDesigner extends Component
 
     public function updateSelected(string $field, mixed $value): void
     {
-        $allowed = ['x', 'y', 'width', 'height', 'rotation', 'layerOrder', 'text', 'bindingKey', 'prefix', 'suffix', 'fontSize', 'fontFamily', 'fontWeight', 'align'];
+        $allowed = ['x', 'y', 'width', 'height', 'rotation', 'layerOrder', 'text', 'bindingKey', 'prefix', 'suffix', 'fontSize', 'fontFamily', 'fontWeight', 'fontStyle', 'align'];
 
         if (! in_array($field, $allowed, true)) {
             return;
@@ -402,12 +476,23 @@ class LabelDesigner extends Component
                 $element[$field] = $field === 'rotation' ? (float) $value : $this->snap((float) $value);
             } elseif ($field === 'layerOrder') {
                 $element[$field] = max(1, (int) $value);
-            } elseif (in_array($field, ['fontSize', 'fontFamily', 'fontWeight', 'align'], true)) {
+            } elseif (in_array($field, ['fontSize', 'fontFamily', 'fontWeight', 'fontStyle', 'align'], true)) {
                 $element['style'] ??= [];
                 $element['style'][$field] = $field === 'fontSize' ? max(4, (float) $value) : (string) $value;
             } else {
                 $element[$field] = (string) $value;
             }
+
+            return $element;
+        });
+    }
+
+    public function updateElementPosition(string $key, float $x, float $y): void
+    {
+        $this->selectedElementKey = $key;
+        $this->mutateSelected(function (array $element) use ($x, $y): array {
+            $element['x'] = $this->clamp($this->snap($x), 0, max(0, $this->widthMm - (float) ($element['width'] ?? 2)));
+            $element['y'] = $this->clamp($this->snap($y), 0, max(0, $this->heightMm - (float) ($element['height'] ?? 2)));
 
             return $element;
         });
@@ -437,14 +522,19 @@ class LabelDesigner extends Component
 
     private function defaultJson(): array
     {
+        $barcodeHeight = min(18, max(12, $this->heightMm * 0.22));
+        $barcodeY = max(3, $this->heightMm - $barcodeHeight - 4);
+
         return [
             'widthMm' => $this->widthMm,
             'heightMm' => $this->heightMm,
             'gridMm' => 2.5,
             'elements' => [
-                ['key' => 'product_name', 'type' => 'binding_text', 'bindingKey' => 'product.name', 'x' => 5, 'y' => 5, 'width' => 60, 'height' => 10, 'layerOrder' => 1, 'style' => ['fontSize' => 12, 'fontFamily' => 'Arial', 'fontWeight' => 'bold']],
-                ['key' => 'net_weight', 'type' => 'binding_text', 'bindingKey' => 'weight.net', 'x' => 5, 'y' => 20, 'width' => 40, 'height' => 10, 'layerOrder' => 2, 'prefix' => 'Net: ', 'style' => ['fontSize' => 10, 'fontFamily' => 'Arial', 'fontWeight' => 'normal']],
-                ['key' => 'barcode', 'type' => 'barcode', 'bindingKey' => 'barcode.value', 'x' => 5, 'y' => 40, 'width' => 55, 'height' => 20, 'layerOrder' => 3],
+                $this->bindingElement('company_name', 'company.name', 4, 3, max(20, $this->widthMm - 8), 8, 1, '', '', 13, '800', 'center'),
+                $this->bindingElement('product_name', 'product.name', 4, 14, max(20, $this->widthMm - 8), 10, 2, 'Product: ', '', 12, '800', 'center'),
+                $this->bindingElement('net_weight', 'weight.net', 4, 28, max(20, $this->widthMm - 8), 12, 3, 'Net: ', ' kg', 15, '800', 'center'),
+                $this->bindingElement('serial_number', 'serial.number', 4, 43, max(20, $this->widthMm - 8), 7, 4, 'Sr: ', '', 8, '600', 'center'),
+                $this->barcodeElement(8, $barcodeY, max(20, $this->widthMm - 16), $barcodeHeight, 5),
             ],
         ];
     }
@@ -462,11 +552,20 @@ class LabelDesigner extends Component
             'height' => 8,
             'rotation' => 0,
             'layerOrder' => $index,
-            'style' => ['fontSize' => 10, 'fontFamily' => 'Arial', 'fontWeight' => 'normal'],
+            'style' => [
+                'fontSize' => 10,
+                'prefixFontSize' => 10,
+                'suffixFontSize' => 10,
+                'fontFamily' => 'Arial',
+                'fontWeight' => 'normal',
+            ],
         ], $partial);
 
+        $element['x'] = $this->clamp((float) $element['x'], 0, max(0, $this->widthMm - (float) $element['width']));
+        $element['y'] = $this->clamp((float) $element['y'], 0, max(0, $this->heightMm - (float) $element['height']));
         $this->selectedElementKey = $element['key'];
         $this->templateJson['elements'][] = $element;
+        $this->ensureMandatoryBarcode();
         $this->syncTemplateText();
     }
 
@@ -503,8 +602,64 @@ class LabelDesigner extends Component
     {
         $this->templateJson['widthMm'] = $this->widthMm;
         $this->templateJson['heightMm'] = $this->heightMm;
+        $this->ensureMandatoryBarcode();
         $this->templateJsonText = json_encode($this->templateJson, JSON_PRETTY_PRINT);
         $this->refreshWarnings();
+    }
+
+    private function resizeCanvas(): void
+    {
+        $this->widthMm = $this->clamp((float) $this->widthMm, 20, 300);
+        $this->heightMm = $this->clamp((float) $this->heightMm, 20, 300);
+        $this->syncTemplateFromText();
+        $this->templateJson['widthMm'] = $this->widthMm;
+        $this->templateJson['heightMm'] = $this->heightMm;
+
+        foreach ($this->templateJson['elements'] as $index => $element) {
+            $this->templateJson['elements'][$index]['x'] = $this->clamp((float) ($element['x'] ?? 0), 0, max(0, $this->widthMm - (float) ($element['width'] ?? 2)));
+            $this->templateJson['elements'][$index]['y'] = $this->clamp((float) ($element['y'] ?? 0), 0, max(0, $this->heightMm - (float) ($element['height'] ?? 2)));
+        }
+
+        $this->ensureMandatoryBarcode();
+        $this->syncTemplateText();
+    }
+
+    private function ensureMandatoryBarcode(): void
+    {
+        $this->templateJson['elements'] ??= [];
+        $barcodes = collect($this->templateJson['elements'])
+            ->filter(fn (array $element): bool => ($element['type'] ?? null) === 'barcode')
+            ->values();
+
+        if ($barcodes->isEmpty()) {
+            $this->templateJson['elements'][] = $this->barcodeElement(
+                5,
+                max(3, $this->heightMm - 20),
+                max(20, $this->widthMm - 10),
+                min(16, max(10, $this->heightMm * 0.22)),
+                count($this->templateJson['elements']) + 1
+            );
+
+            return;
+        }
+
+        $firstBarcodeKey = $barcodes->first()['key'] ?? 'barcode';
+        $this->templateJson['elements'] = collect($this->templateJson['elements'])
+            ->reject(fn (array $element): bool => ($element['type'] ?? null) === 'barcode' && ($element['key'] ?? null) !== $firstBarcodeKey)
+            ->map(function (array $element): array {
+                if (($element['type'] ?? null) === 'barcode') {
+                    $element['key'] = 'barcode';
+                    $element['bindingKey'] = 'barcode.value';
+                    $element['width'] = max(18, min((float) ($element['width'] ?? 45), $this->widthMm));
+                    $element['height'] = max(8, min((float) ($element['height'] ?? 14), $this->heightMm));
+                    $element['x'] = $this->clamp((float) ($element['x'] ?? 0), 0, max(0, $this->widthMm - (float) $element['width']));
+                    $element['y'] = $this->clamp((float) ($element['y'] ?? 0), 0, max(0, $this->heightMm - (float) $element['height']));
+                }
+
+                return $element;
+            })
+            ->values()
+            ->all();
     }
 
     private function loadStructuredSettings(): void
@@ -655,11 +810,37 @@ class LabelDesigner extends Component
         return round($value / $grid) * $grid;
     }
 
+    private function clamp(float $value, float $min, float $max): float
+    {
+        return min($max, max($min, $value));
+    }
+
     private function fontFamilies(): array
     {
         return [
             'Arial',
+            'Sans Serif',
             'Helvetica',
+            'Serif',
+            'Roman',
+            'Typewriter',
+            'Mono',
+            'Condensed',
+            'OCR-B',
+            'TSPL Font 1',
+            'TSPL Font 2',
+            'TSPL Font 3',
+            'TSPL Font 4',
+            'TSPL 1 - 8x12',
+            'TSPL 2 - 12x20',
+            'TSPL 3 - 16x24',
+            'TSPL 4 - 24x32',
+            'TSPL 5 - 32x48',
+            'TSPL TSS24.BF2',
+            'TSPL TST24.BF2',
+            'TSPL K',
+            'TSPL OCR-A',
+            'TSPL OCR-B',
             'Verdana',
             'Tahoma',
             'Times New Roman',
@@ -686,16 +867,16 @@ class LabelDesigner extends Component
     {
         return [
             'small_50_essential' => [
-                'label' => 'Small 50x75 - Essential 5 fields',
+                'label' => 'Small 75x50 - Essential 5 fields',
                 'size' => '50x75',
-                'widthMm' => 50,
-                'heightMm' => 75,
+                'widthMm' => 75,
+                'heightMm' => 50,
                 'elements' => [
-                    $this->bindingElement('company_name', 'company.name', 3, 3, 44, 6, 1, '', '', 9, '700', 'center'),
-                    $this->bindingElement('product_name', 'product.name', 3, 11, 44, 10, 2, '', '', 12, '700', 'center'),
-                    $this->bindingElement('net_weight', 'weight.net', 3, 24, 44, 11, 3, 'Net: ', ' kg', 13, '800', 'center'),
-                    $this->bindingElement('serial_number', 'serial.number', 3, 39, 44, 6, 4, 'Sr: ', '', 8, '500', 'center'),
-                    $this->barcodeElement(5, 49, 40, 20, 5),
+                    $this->bindingElement('company_name', 'company.name', 4, 3, 67, 6, 1, '', '', 11, '800', 'center'),
+                    $this->bindingElement('product_name', 'product.name', 4, 10, 43, 8, 2, '', '', 10, '700'),
+                    $this->bindingElement('net_weight', 'weight.net', 49, 10, 22, 8, 3, 'Net: ', ' kg', 10, '800'),
+                    $this->bindingElement('serial_number', 'serial.number', 4, 20, 67, 5, 4, 'Sr: ', '', 7, '500', 'center'),
+                    $this->barcodeElement(10, 28, 55, 16, 5),
                 ],
             ],
             'medium_75_5_fields' => [
@@ -704,7 +885,7 @@ class LabelDesigner extends Component
                 'widthMm' => 75,
                 'heightMm' => 75,
                 'elements' => [
-                    $this->bindingElement('company_name', 'company.name', 4, 3, 67, 8, 1, '', '', 11, '800', 'center'),
+                    $this->bindingElement('company_name', 'company.name', 4, 3, 67, 8, 1, '', '', 13, '800', 'center'),
                     $this->bindingElement('product_name', 'product.name', 4, 14, 67, 10, 2, 'Product: ', '', 12, '800', 'center'),
                     $this->bindingElement('net_weight', 'weight.net', 4, 28, 32, 11, 3, 'Net: ', ' kg', 13, '800', 'center'),
                     $this->bindingElement('piece_quantity', 'pieces.quantity', 39, 28, 32, 11, 4, 'PCS: ', '', 12, '700', 'center'),
@@ -718,7 +899,7 @@ class LabelDesigner extends Component
                 'widthMm' => 75,
                 'heightMm' => 75,
                 'elements' => [
-                    $this->bindingElement('company_name', 'company.name', 4, 3, 67, 7, 1, '', '', 10, '800', 'center'),
+                    $this->bindingElement('company_name', 'company.name', 4, 3, 67, 7, 1, '', '', 12, '800', 'center'),
                     $this->bindingElement('product_name', 'product.name', 4, 12, 43, 9, 2, 'Product: ', '', 11, '700'),
                     $this->bindingElement('variant_name', 'variant.name', 49, 12, 22, 9, 3, 'Var: ', '', 9, '600'),
                     $this->bindingElement('net_weight', 'weight.net', 4, 24, 32, 10, 4, 'Net: ', ' kg', 12, '800', 'center'),
@@ -734,7 +915,7 @@ class LabelDesigner extends Component
                 'widthMm' => 75,
                 'heightMm' => 75,
                 'elements' => [
-                    $this->bindingElement('company_name', 'company.name', 4, 3, 67, 6, 1, '', '', 9, '700', 'center'),
+                    $this->bindingElement('company_name', 'company.name', 4, 3, 67, 7, 1, '', '', 11, '800', 'center'),
                     $this->bindingElement('product_name', 'product.name', 4, 11, 42, 8, 2, 'Product: ', '', 10, '700'),
                     $this->bindingElement('variant_name', 'variant.name', 47, 11, 24, 8, 3, 'Var: ', '', 8, '600'),
                     $this->bindingElement('gross_weight', 'weight.gross', 4, 21, 21, 7, 4, 'Gross: ', ' kg', 8, '500'),
@@ -774,7 +955,7 @@ class LabelDesigner extends Component
                 'widthMm' => 75,
                 'heightMm' => 100,
                 'elements' => [
-                    $this->bindingElement('company_name', 'company.name', 4, 4, 67, 7, 1, '', '', 10, '800', 'center'),
+                    $this->bindingElement('company_name', 'company.name', 4, 4, 67, 8, 1, '', '', 12, '800', 'center'),
                     $this->bindingElement('product_name', 'product.name', 4, 15, 67, 9, 2, 'Product: ', '', 11, '800'),
                     $this->bindingElement('gross_weight', 'weight.gross', 4, 29, 30, 8, 3, 'Gross: ', ' kg', 9, '600'),
                     $this->bindingElement('tare_weight', 'weight.tare', 39, 29, 32, 8, 4, 'Tare: ', ' kg', 9, '600'),
@@ -809,9 +990,22 @@ class LabelDesigner extends Component
             '75x75' => '75 x 75 mm',
             '100x100' => '100 x 100 mm',
             '75x100' => '75 x 100 mm',
-            '50x75' => '50 x 75 mm',
+            '50x75' => '75 x 50 mm (horizontal)',
             '100x150' => '100 x 150 mm',
+            'custom' => 'Custom size',
         ];
+    }
+
+    private function inferSize(float $widthMm, float $heightMm): string
+    {
+        return match (true) {
+            abs($widthMm - 75) < 0.5 && abs($heightMm - 75) < 0.5 => '75x75',
+            abs($widthMm - 100) < 0.5 && abs($heightMm - 100) < 0.5 => '100x100',
+            abs($widthMm - 75) < 0.5 && abs($heightMm - 100) < 0.5 => '75x100',
+            abs($widthMm - 75) < 0.5 && abs($heightMm - 50) < 0.5 => '50x75',
+            abs($widthMm - 100) < 0.5 && abs($heightMm - 150) < 0.5 => '100x150',
+            default => 'custom',
+        };
     }
 
     private function textElement(string $key, string $text, float $x, float $y, float $width, float $height, int $layerOrder, float $fontSize = 9, string $fontWeight = '500', string $align = 'left'): array
@@ -827,6 +1021,8 @@ class LabelDesigner extends Component
             'layerOrder' => $layerOrder,
             'style' => [
                 'fontSize' => $fontSize,
+                'prefixFontSize' => $fontSize,
+                'suffixFontSize' => $fontSize,
                 'fontFamily' => 'Arial',
                 'fontWeight' => $fontWeight,
                 'align' => $align,
@@ -849,6 +1045,8 @@ class LabelDesigner extends Component
             'suffix' => $suffix,
             'style' => [
                 'fontSize' => $fontSize,
+                'prefixFontSize' => $fontSize,
+                'suffixFontSize' => $fontSize,
                 'fontFamily' => 'Arial',
                 'fontWeight' => $fontWeight,
                 'align' => $align,

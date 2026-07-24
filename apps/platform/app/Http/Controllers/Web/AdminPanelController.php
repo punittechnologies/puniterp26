@@ -156,14 +156,25 @@ class AdminPanelController extends Controller
         return back()->with('status', 'Onboarding access created. Customer can now create their admin login.');
     }
 
-    public function appUsers(): View
+    public function appUsers(Request $request): View
     {
         abort_unless(Auth::user()?->hasPermission('users.manage'), 403);
 
         $tenantId = $this->tenantId();
+        $editing = null;
+        if ($request->filled('edit')) {
+            $editing = User::query()
+                ->where('tenant_id', $tenantId)
+                ->where(function ($query): void {
+                    $query->where('app_only', true)
+                        ->orWhere('app_username', '!=', null);
+                })
+                ->findOrFail($request->string('edit')->toString());
+        }
 
         return view('admin.app-users.index', [
             'title' => 'App Users',
+            'editing' => $editing,
             'users' => User::query()
                 ->where('tenant_id', $tenantId)
                 ->where('app_only', true)
@@ -301,6 +312,13 @@ class AdminPanelController extends Controller
             'filters' => ['from' => $from->toDateString(), 'to' => $to->toDateString(), 'search' => $request->search, 'status' => $request->status],
             'products' => Product::query()->where('tenant_id', $tenantId)->where('is_active', true)->orderBy('name')->get(),
             'variants' => ProductVariant::query()->where('tenant_id', $tenantId)->where('is_active', true)->orderBy('name')->get(),
+            'productDetailFields' => DynamicFieldDefinition::query()
+                ->where('tenant_id', $tenantId)
+                ->where('entity_type', 'product_variant')
+                ->where('is_active', true)
+                ->orderBy('sort_order')
+                ->orderBy('field_label')
+                ->get(),
         ]);
     }
 
@@ -560,10 +578,33 @@ class AdminPanelController extends Controller
     public function dispatches(Request $request): View
     {
         $tenantId = $this->tenantId();
+        [$from, $to] = $this->dateRange($request, defaultDays: 30);
+        $query = Dispatch::query()
+            ->with('items')
+            ->where('tenant_id', $tenantId)
+            ->whereBetween(DB::raw('coalesce(confirmed_at, created_at)'), [$from, $to])
+            ->when($request->filled('customer_id'), fn ($query) => $query->where('customer_id', $request->string('customer_id')->toString()))
+            ->when($request->filled('search'), function ($query) use ($request): void {
+                $search = '%'.$request->string('search')->toString().'%';
+                $query->where(function ($query) use ($search): void {
+                    $query->where('dispatch_number', 'like', $search)
+                        ->orWhere('customer_snapshot->name', 'like', $search)
+                        ->orWhereHas('items', fn ($query) => $query
+                            ->where('barcode_value', 'like', $search)
+                            ->orWhere('serial_number', 'like', $search));
+                });
+            })
+            ->latest();
 
         return view('admin.dispatch.index', [
             'title' => 'Dispatch',
-            'rows' => Dispatch::query()->with('items')->where('tenant_id', $tenantId)->latest()->paginate(25),
+            'rows' => $query->paginate(25)->withQueryString(),
+            'filters' => [
+                'from' => $from->toDateString(),
+                'to' => $to->toDateString(),
+                'customer_id' => $request->string('customer_id')->toString(),
+                'search' => $request->string('search')->toString(),
+            ],
             'customers' => Customer::query()->where('tenant_id', $tenantId)->where('is_active', true)->orderBy('name')->get(),
             'recentAvailable' => ProductionTransaction::query()->where('tenant_id', $tenantId)->where('status', 'active')->latest('captured_at')->limit(10)->get(),
         ]);

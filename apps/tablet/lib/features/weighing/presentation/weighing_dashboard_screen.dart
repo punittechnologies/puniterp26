@@ -265,6 +265,28 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
           ? 'Connected to ${saved.name}'
           : 'Saved printer: ${saved.name}';
     });
+    if (saved != null && !connected) {
+      unawaited(_autoConnectPrinter(saved));
+    }
+  }
+
+  Future<void> _autoConnectPrinter(PrinterDevice saved) async {
+    try {
+      await printerAdapter.connect(saved.id);
+      if (!mounted) return;
+      setState(() {
+        configuredPrinter = saved;
+        printerStatus = PrinterConnectionStatus.connected;
+        printerMessage = 'Connected to ${saved.name}';
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        printerStatus = PrinterConnectionStatus.disconnected;
+        printerMessage =
+            'Saved printer: ${saved.name}. Tap printer icon to reconnect.';
+      });
+    }
   }
 
   Future<bool> _requestBluetoothPermissions() async {
@@ -662,6 +684,7 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
     labelTemplate = await labelRepository.effective(
       productId: selectedProduct?.id,
       variantId: null,
+      preferServerTemplates: true,
     );
     currentInventory = selectedProduct == null
         ? 0
@@ -784,9 +807,15 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
         printerStatus = PrinterConnectionStatus.printing;
         printerMessage = 'Sending label...';
       });
+      try {
+        await labelRepository.sync();
+      } catch (_) {
+        // Continue with the last cached web template if internet is temporarily unavailable.
+      }
       final activeTemplate = await labelRepository.effective(
         productId: product.id,
         variantId: null,
+        preferServerTemplates: true,
       );
       labelTemplate = activeTemplate;
       final result = await printerAdapter.print(
@@ -794,7 +823,7 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
           jobId: 'print_${DateTime.now().microsecondsSinceEpoch}',
           template: activeTemplate?.templateJson ?? const {},
           data: {
-            'company_name': 'Punit Weighing',
+            'company_name': _companyNameForTemplate(activeTemplate),
             'product_name': product.name,
             'variant_name': null,
             'serial_number': lastSavedSerial ?? 'PREVIEW',
@@ -826,6 +855,30 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
         printerMessage = 'Print failed: $error';
       });
     }
+  }
+
+  String _companyNameForTemplate(LabelTemplateConfig? template) {
+    final json = template?.templateJson;
+    if (json == null) return 'PUNIT ERP';
+    final structured = json['structured'];
+    if (structured is Map) {
+      final company = structured['companyName']?.toString().trim();
+      if (company != null && company.isNotEmpty) return company;
+    }
+    final elements = json['elements'];
+    if (elements is List) {
+      for (final raw in elements) {
+        if (raw is! Map) continue;
+        final key = raw['bindingKey']?.toString();
+        if (key == 'company.name') {
+          final preview = raw['previewValue']?.toString().trim();
+          if (preview != null && preview.isNotEmpty) return preview;
+          final text = raw['text']?.toString().trim();
+          if (text != null && text.isNotEmpty) return text;
+        }
+      }
+    }
+    return 'PUNIT ERP';
   }
 
   void _showCornerMessage(String message, {bool error = false}) {

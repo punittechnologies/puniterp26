@@ -55,6 +55,7 @@ class LabelTemplateRepository {
   Future<LabelTemplateConfig?> effective({
     String? productId,
     String? variantId,
+    bool preferServerTemplates = false,
   }) async {
     final templates = await cachedTemplates();
     final selectedId = await selectedTemplateId();
@@ -69,9 +70,7 @@ class LabelTemplateRepository {
       return null;
     }
 
-    return find((template) => template.id == selectedId) ??
-        find((template) => template.code == accountCode) ??
-        find((template) => template.id == localId) ??
+    final serverResolved =
         find(
           (template) =>
               template.scope == 'variant' && template.variantId == variantId,
@@ -82,6 +81,15 @@ class LabelTemplateRepository {
         ) ??
         find((template) => template.scope == 'tenant' && template.isDefault) ??
         find((template) => template.scope == 'system' && template.isDefault);
+
+    if (preferServerTemplates && serverResolved != null) {
+      return serverResolved;
+    }
+
+    return find((template) => template.id == selectedId) ??
+        find((template) => template.code == accountCode) ??
+        find((template) => template.id == localId) ??
+        serverResolved;
   }
 
   Future<void> activatePayload(Map<String, dynamic> payload) async {

@@ -2,6 +2,7 @@
 
 namespace App\Models\ProductConfiguration;
 
+use App\Casts\NullableDecimal;
 use App\Models\Concerns\HasUuidPrimaryKey;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
@@ -14,7 +15,7 @@ class Unit extends Model
     protected function casts(): array
     {
         return [
-            'conversion_factor_to_base' => 'decimal:8',
+            'conversion_factor_to_base' => NullableDecimal::class.':8',
             'decimal_precision' => 'integer',
             'is_system' => 'boolean',
             'is_active' => 'boolean',

@@ -25,27 +25,9 @@ tar -xzf /home/u407989482/punit_erp_platform_release.tar.gz -C "$APP_DIR.new"
 if [ -f "$APP_DIR/.env" ]; then
   cp "$APP_DIR/.env" "$APP_DIR.new/.env"
 else
-  cat > "$APP_DIR.new/.env" <<'ENVFILE'
-APP_NAME="Punit ERP"
-APP_ENV=production
-APP_KEY=base64:Lbz9DBuMe2lBJvO0PuBLVrnV3zO6zZkRxxew41TskPE=
-APP_DEBUG=false
-APP_URL=https://erp.puniterp.com
-ASSET_URL=https://erp.puniterp.com
-LOG_CHANNEL=stack
-LOG_LEVEL=error
-DB_CONNECTION=sqlite
-DB_DATABASE=/home/u407989482/domains/erp.puniterp.com/punit_erp_app/database/database.sqlite
-SESSION_DRIVER=file
-SESSION_LIFETIME=120
-SESSION_ENCRYPT=false
-SESSION_PATH=/
-SESSION_DOMAIN=.erp.puniterp.com
-CACHE_STORE=file
-QUEUE_CONNECTION=sync
-FILESYSTEM_DISK=local
-SANCTUM_STATEFUL_DOMAINS=erp.puniterp.com
-ENVFILE
+  echo "Deployment aborted: $APP_DIR/.env does not exist." >&2
+  echo "Create the production .env securely on the server before deploying." >&2
+  exit 1
 fi
 
 mkdir -p \

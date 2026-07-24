@@ -2,6 +2,7 @@
 
 namespace App\Models\ProductConfiguration;
 
+use App\Casts\NullableDecimal;
 use App\Models\Concerns\HasUuidPrimaryKey;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
@@ -14,9 +15,9 @@ class UnitConversionRule extends Model
     protected function casts(): array
     {
         return [
-            'weight_per_piece' => 'decimal:6',
-            'pieces_per_kg' => 'decimal:6',
-            'sample_weight' => 'decimal:6',
+            'weight_per_piece' => NullableDecimal::class.':6',
+            'pieces_per_kg' => NullableDecimal::class.':6',
+            'sample_weight' => NullableDecimal::class.':6',
             'sample_piece_count' => 'integer',
             'decimal_places' => 'integer',
             'is_active' => 'boolean',
