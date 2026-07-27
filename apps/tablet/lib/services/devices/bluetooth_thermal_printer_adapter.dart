@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert' show ascii, base64Decode, jsonDecode, jsonEncode;
 import 'dart:io';
+import 'dart:math' show min;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -9,9 +10,13 @@ import 'package:image/image.dart' as img;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../core/config/app_edition.dart';
 import 'printer_adapter.dart';
 
 class BluetoothThermalPrinterAdapter implements PrinterAdapter {
+  BluetoothThermalPrinterAdapter({bool? qrPrintingEnabled})
+    : qrPrintingEnabled = qrPrintingEnabled ?? AppEdition.webManagedLabels;
+
   static const _savedPrinterKey = 'printer.selected.ble_tspl';
   static const _savedCharacteristicKey = 'printer.selected.ble_characteristic';
   static const _tvsChannel = MethodChannel('punit.erp/tvs_printer');
@@ -20,6 +25,7 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
   static const _connectTimeout = Duration(seconds: 14);
   static const _writeChunkSize = 20;
 
+  final bool qrPrintingEnabled;
   BluetoothDevice? _device;
   BluetoothCharacteristic? _writeCharacteristic;
   String? _connectedDeviceId;
@@ -663,6 +669,34 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
     var hasBarcode = false;
     for (final element in ordered) {
       final type = element['type']?.toString();
+      if (type == 'qr' || type == 'qrcode') {
+        if (!qrPrintingEnabled) {
+          continue;
+        }
+        final value = _bindingValue(
+          element['bindingKey']?.toString() ?? 'qr.value',
+          data,
+        );
+        if (value.isEmpty) {
+          continue;
+        }
+        final widthDots = _dots(element['width']).clamp(48, 832);
+        final heightDots = _dots(element['height']).clamp(48, 832);
+        final cellWidth = (min(widthDots, heightDots) ~/ 45).clamp(2, 8);
+        final estimatedSize = cellWidth * 45;
+        final x =
+            _dots(element['x']) +
+            ((widthDots - estimatedSize).clamp(0, widthDots) ~/ 2);
+        final y =
+            _dots(element['y']) +
+            ((heightDots - estimatedSize).clamp(0, heightDots) ~/ 2);
+        final rotation = _qrRotation(_num(element['rotation']) ?? 0);
+        lines.add(
+          'QRCODE $x,$y,M,$cellWidth,A,$rotation,M2,S7,"${_escape(value)}"',
+        );
+        continue;
+      }
+
       if (type == 'barcode') {
         hasBarcode = true;
         final barcode = _clean(
@@ -860,6 +894,7 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
       'pieces.quantity' => _clean(data['piece_quantity']),
       'serial.number' => _clean(data['serial_number']),
       'barcode.value' => _clean(data['barcode_value']),
+      'qr.value' => _clean(data['qr_value']),
       'date.current' => DateTime.now().toIso8601String().substring(0, 10),
       'time.current' => DateTime.now().toIso8601String().substring(11, 16),
       'operator.name' => _clean(data['operator_name']).ifEmpty('-'),
@@ -897,6 +932,14 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
     final parsed = num.tryParse(value?.toString() ?? '');
     if (parsed == null) return '0.000';
     return parsed.toStringAsFixed(3);
+  }
+
+  int _qrRotation(num value) {
+    final normalized = ((value.round() % 360) + 360) % 360;
+    if (normalized >= 315 || normalized < 45) return 0;
+    if (normalized < 135) return 90;
+    if (normalized < 225) return 180;
+    return 270;
   }
 
   int _dots(Object? mm) => ((_num(mm) ?? 0) * 8).round();

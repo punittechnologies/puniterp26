@@ -131,6 +131,14 @@
             </div>
 
             <div class="label-tool-section">
+                <h4>Verification</h4>
+                <div class="label-tool-group">
+                    <button type="button" x-on:click="addQr()">Secure QR verification</button>
+                </div>
+                <small>Add once, then position and resize it. The Web Label APK creates the secure public URL when the label prints.</small>
+            </div>
+
+            <div class="label-tool-section">
                 <h4>Custom</h4>
                 <div class="label-tool-group">
                     <button type="button" x-on:click="addText()">Text box</button>
@@ -197,7 +205,7 @@
             <div class="label-format-form" x-show="selectedElement">
                 <div class="label-selected-name">
                     <span>Selected</span>
-                    <strong x-text="selectedElement?.type === 'barcode' ? 'Mandatory barcode' : (selectedElement?.bindingKey || selectedElement?.text || selectedElement?.type)"></strong>
+                    <strong x-text="selectedElement?.type === 'barcode' ? 'Mandatory barcode' : (selectedElement?.type === 'qr' ? 'Secure QR verification' : (selectedElement?.bindingKey || selectedElement?.text || selectedElement?.type))"></strong>
                 </div>
 
                 <label x-show="selectedElement?.type === 'text'">
@@ -211,7 +219,7 @@
                     <small>Use Prefix for the printed caption. Example: Prefix “Color: ” + value “Red” prints “Color: Red”.</small>
                 </div>
 
-                <div class="label-prefix-focus" x-show="!['barcode','image','rectangle','line'].includes(selectedElement?.type)">
+                <div class="label-prefix-focus" x-show="!['barcode','qr','image','rectangle','line'].includes(selectedElement?.type)">
                     <label>
                         <span>Prefix / printed caption</span>
                         <input placeholder="Example: Color: " x-model="selectedElement.prefix" x-on:change="updateSelected('prefix', selectedElement.prefix || '')">
@@ -241,7 +249,7 @@
                     </label>
                 </div>
 
-                <div class="label-format-grid" x-show="['barcode','image','rectangle','line'].includes(selectedElement?.type)">
+                <div class="label-format-grid" x-show="['barcode','qr','image','rectangle','line'].includes(selectedElement?.type)">
                     <label>
                         <span>Width</span>
                         <input type="number" step="1" x-model.number="selectedElement.width" x-on:change="updateSelected('width', selectedElement.width)">
@@ -252,7 +260,7 @@
                     </label>
                 </div>
 
-                <details class="label-text-width-details" x-show="!['barcode','image','rectangle','line'].includes(selectedElement?.type)">
+                <details class="label-text-width-details" x-show="!['barcode','qr','image','rectangle','line'].includes(selectedElement?.type)">
                     <summary>Advanced text line width</summary>
                     <div class="label-format-grid">
                         <label>
@@ -273,7 +281,7 @@
                     <button type="button" x-on:click="nudge(1, 0)">Right</button>
                 </div>
 
-                <div class="label-format-buttons label-format-buttons--size" x-show="['barcode','image','rectangle','line'].includes(selectedElement?.type)">
+                <div class="label-format-buttons label-format-buttons--size" x-show="['barcode','qr','image','rectangle','line'].includes(selectedElement?.type)">
                     <button type="button" x-on:click="resizeSelected(2, 0)">Wider</button>
                     <button type="button" x-on:click="resizeSelected(-2, 0)">Narrower</button>
                     <button type="button" x-on:click="resizeSelected(0, 2)">Taller</button>
@@ -287,7 +295,7 @@
                     <button type="button" x-on:click="layerSelected(1)">Bring front</button>
                 </div>
 
-                <label x-show="!['barcode','image','rectangle','line'].includes(selectedElement?.type)">
+                <label x-show="!['barcode','qr','image','rectangle','line'].includes(selectedElement?.type)">
                     <span>Font family</span>
                     <select x-model="selectedElement.style.fontFamily" x-on:change="updateSelected('style.fontFamily', selectedElement.style.fontFamily)">
                         @foreach ($fontFamilies as $family)
@@ -296,7 +304,7 @@
                     </select>
                 </label>
 
-                <div class="label-format-grid" x-show="!['barcode','image','rectangle','line'].includes(selectedElement?.type)">
+                <div class="label-format-grid" x-show="!['barcode','qr','image','rectangle','line'].includes(selectedElement?.type)">
                     <label>
                         <span>Font size</span>
                         <input type="number" min="4" max="72" step="1" x-model.number="selectedElement.style.fontSize" x-on:change="updateSelected('style.fontSize', selectedElement.style.fontSize)">
@@ -311,18 +319,18 @@
                     </label>
                 </div>
 
-                <p class="label-preview-value-note" x-show="!['barcode','image','rectangle','line'].includes(selectedElement?.type)">
+                <p class="label-preview-value-note" x-show="!['barcode','qr','image','rectangle','line'].includes(selectedElement?.type)">
                     Prefix, live value and suffix use one font size so the web preview and 203-DPI printer stay aligned.
                 </p>
 
-                <div class="label-format-buttons" x-show="!['barcode','image','rectangle','line'].includes(selectedElement?.type)">
+                <div class="label-format-buttons" x-show="!['barcode','qr','image','rectangle','line'].includes(selectedElement?.type)">
                     <button type="button" x-on:click="changeFontSize(-1)">Font -</button>
                     <button type="button" x-on:click="changeFontSize(1)">Font +</button>
                     <button type="button" x-on:click="fitText()">Fit text</button>
                     <button type="button" x-on:click="updateSelected('style.fontWeight', '800')">Max bold</button>
                 </div>
 
-                <div class="label-format-grid" x-show="!['barcode','image','rectangle','line'].includes(selectedElement?.type)">
+                <div class="label-format-grid" x-show="!['barcode','qr','image','rectangle','line'].includes(selectedElement?.type)">
                     <label>
                         <span>Style</span>
                         <select x-model="selectedElement.style.fontStyle" x-on:change="updateSelected('style.fontStyle', selectedElement.style.fontStyle)">

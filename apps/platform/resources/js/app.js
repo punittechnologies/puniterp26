@@ -111,7 +111,28 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
                 node = new Konva.Rect({ ...attrs, stroke: '#0f172a', strokeWidth: Number(element.borderWidth || 1), fill: element.fill || 'transparent' });
             } else if (element.type === 'line') {
                 node = new Konva.Rect({ ...attrs, fill: '#0f172a', stroke: '#0f172a', strokeWidth: 0 });
-            } else if (element.type === 'barcode' || element.type === 'qr') {
+            } else if (element.type === 'qr') {
+                node = new Konva.Group({ x: attrs.x, y: attrs.y, width: attrs.width, height: attrs.height, draggable: true, rotation: attrs.rotation, name: element.key });
+                node.add(new Konva.Rect({ x: 0, y: 0, width: attrs.width, height: attrs.height, stroke: '#111827', fill: '#fff' }));
+                const modules = 21;
+                const quiet = Math.max(3, Math.min(attrs.width, attrs.height) * 0.07);
+                const cell = Math.max(1, (Math.min(attrs.width, attrs.height) - quiet * 2) / modules);
+                const finder = (row, col) => {
+                    const zones = [[0, 0], [0, modules - 7], [modules - 7, 0]];
+                    return zones.some(([top, left]) => row >= top && row < top + 7 && col >= left && col < left + 7
+                        && (row === top || row === top + 6 || col === left || col === left + 6
+                            || (row >= top + 2 && row <= top + 4 && col >= left + 2 && col <= left + 4)));
+                };
+                for (let row = 0; row < modules; row += 1) {
+                    for (let col = 0; col < modules; col += 1) {
+                        const finderCell = finder(row, col);
+                        const dataCell = !finderCell && ((row * 11 + col * 7 + row * col) % 5 < 2);
+                        if (finderCell || dataCell) {
+                            node.add(new Konva.Rect({ x: quiet + col * cell, y: quiet + row * cell, width: cell + .2, height: cell + .2, fill: '#111827', listening: false }));
+                        }
+                    }
+                }
+            } else if (element.type === 'barcode') {
                 node = new Konva.Group({ x: attrs.x, y: attrs.y, width: attrs.width, height: attrs.height, draggable: true, rotation: attrs.rotation, name: element.key });
                 node.add(new Konva.Rect({ x: 0, y: 0, width: attrs.width, height: attrs.height, stroke: '#111827', fill: '#f8fafc' }));
                 const bars = Math.max(10, Math.floor(attrs.width / 6));
@@ -119,7 +140,7 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
                     const barWidth = index % 3 === 0 ? 3 : 1.5;
                     node.add(new Konva.Rect({ x: 5 + index * 5, y: 4, width: barWidth, height: Math.max(4, attrs.height - 13), fill: '#111827', listening: false }));
                 }
-                node.add(new Konva.Text({ x: 4, y: Math.max(2, attrs.height - 9), width: attrs.width - 8, text: element.type === 'qr' ? 'QR' : 'BARCODE', fontSize: 7, align: 'center', fill: '#334155', listening: false }));
+                node.add(new Konva.Text({ x: 4, y: Math.max(2, attrs.height - 9), width: attrs.width - 8, text: 'BARCODE', fontSize: 7, align: 'center', fill: '#334155', listening: false }));
             } else if (element.type === 'image') {
                 node = new Konva.Group({ x: attrs.x, y: attrs.y, width: attrs.width, height: attrs.height, draggable: true, rotation: attrs.rotation, name: element.key });
                 node.add(new Konva.Rect({ x: 0, y: 0, width: attrs.width, height: attrs.height, stroke: '#94a3b8', dash: [3, 3], fill: '#fff' }));
@@ -171,7 +192,7 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
                     align: 'left',
                 };
             }
-            const canResize = ['barcode', 'image', 'rectangle', 'line'].includes(this.selectedElement?.type);
+            const canResize = ['barcode', 'qr', 'image', 'rectangle', 'line'].includes(this.selectedElement?.type);
             this.transformer.resizeEnabled(canResize);
             this.transformer.enabledAnchors(canResize
                 ? ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']
@@ -227,6 +248,13 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
                 return;
             }
             this.addElement({ type: 'barcode', bindingKey: 'barcode.value', width: 45, height: 16 });
+        },
+        addQr() {
+            if ((this.templateJson.elements || []).some((item) => item.type === 'qr')) {
+                this.warnings = [{ type: 'single_qr_only' }];
+                return;
+            }
+            this.addElement({ type: 'qr', bindingKey: 'qr.value', width: 22, height: 22 });
         },
         addRect() {
             this.addElement({ type: 'rectangle', width: 30, height: 15 });
@@ -311,6 +339,12 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
             if ((this.templateJson.elements || []).filter((element) => element.type === 'barcode').length !== 1) {
                 warnings.push({ type: 'one_barcode_required' });
             }
+            if ((this.templateJson.elements || []).filter((element) => element.type === 'qr').length > 1) {
+                warnings.push({ type: 'single_qr_only' });
+            }
+            (this.templateJson.elements || [])
+                .filter((element) => element.type === 'qr' && (Number(element.width) < 15 || Number(element.height) < 15))
+                .forEach((element) => warnings.push({ type: 'qr_minimum_15mm', element: element.key }));
             this.warnings = warnings;
         },
         syncJsonText() {

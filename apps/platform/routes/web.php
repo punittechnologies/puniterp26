@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\Web\AdminPanelController;
+use App\Http\Controllers\Web\PublicVerificationController;
+use App\Http\Controllers\Web\QrPageController;
 use App\Models\Permission;
 use App\Models\Role;
 use App\Models\Tenant;
@@ -64,6 +66,13 @@ Route::post('/logout', function (Request $request) {
 
     return redirect()->route('login');
 })->name('logout');
+
+Route::get('/verify/{token}', [PublicVerificationController::class, 'show'])
+    ->middleware('throttle:120,1')
+    ->name('verification.show');
+Route::post('/verify/{token}/complaints', [PublicVerificationController::class, 'complaint'])
+    ->middleware('throttle:5,10')
+    ->name('verification.complaints.store');
 
 Route::get('/onboarding', fn () => view('auth.onboarding'))->name('onboarding.start');
 Route::post('/onboarding', function (Request $request) {
@@ -154,6 +163,13 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/audit-logs', [AdminPanelController::class, 'auditLogs'])->name('admin.audit');
     Route::get('/tenant-settings', [AdminPanelController::class, 'tenantSettings'])->name('admin.tenant-settings');
     Route::post('/tenant-settings', [AdminPanelController::class, 'tenantSettingsSave'])->name('admin.tenant-settings.save');
+    Route::middleware('permission:configuration.manage')->group(function (): void {
+        Route::get('/qr-page-design', [QrPageController::class, 'edit'])->name('admin.qr-page.edit');
+        Route::post('/qr-page-design', [QrPageController::class, 'update'])->name('admin.qr-page.update');
+        Route::get('/qr-complaints', [QrPageController::class, 'complaints'])->name('admin.qr-complaints.index');
+        Route::patch('/qr-complaints/{complaint}', [QrPageController::class, 'updateComplaint'])->name('admin.qr-complaints.update');
+        Route::get('/qr-complaints/{complaint}/photo', [QrPageController::class, 'complaintPhoto'])->name('admin.qr-complaints.photo');
+    });
     Route::get('/app-users', [AdminPanelController::class, 'appUsers'])->name('admin.app-users');
     Route::post('/app-users', [AdminPanelController::class, 'appUserStore'])->name('admin.app-users.store');
     Route::patch('/app-users/{user}/status', [AdminPanelController::class, 'appUserStatus'])->name('admin.app-users.status');

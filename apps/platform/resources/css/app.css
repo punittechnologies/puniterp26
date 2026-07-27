@@ -1816,7 +1816,7 @@ nav[role="navigation"] {
     margin-top: 0;
 }
 
-.admin-content > form:not(.filter-bar):not(.customer-report-shell):has(input[type="date"], select, input[type="checkbox"]) {
+.admin-content > form:not(.filter-bar):not(.customer-report-shell):not(.qr-design-form):has(input[type="date"], select, input[type="checkbox"]) {
     border: 1px solid var(--admin-border);
     border-radius: 18px;
     background:
@@ -1831,12 +1831,12 @@ nav[role="navigation"] {
     box-shadow: 0 16px 50px rgba(37, 99, 235, .06);
 }
 
-.admin-content > form:not(.filter-bar):not(.customer-report-shell):has(input[type="date"], select, input[type="checkbox"]) > label {
+.admin-content > form:not(.filter-bar):not(.customer-report-shell):not(.qr-design-form):has(input[type="date"], select, input[type="checkbox"]) > label {
     min-width: 0;
 }
 
-.admin-content > form:not(.filter-bar):not(.customer-report-shell):has(input[type="date"], select, input[type="checkbox"]) input:not([type="checkbox"]),
-.admin-content > form:not(.filter-bar):not(.customer-report-shell):has(input[type="date"], select, input[type="checkbox"]) select {
+.admin-content > form:not(.filter-bar):not(.customer-report-shell):not(.qr-design-form):has(input[type="date"], select, input[type="checkbox"]) input:not([type="checkbox"]),
+.admin-content > form:not(.filter-bar):not(.customer-report-shell):not(.qr-design-form):has(input[type="date"], select, input[type="checkbox"]) select {
     width: 100%;
     min-height: 46px;
 }

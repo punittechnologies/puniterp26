@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\V1\Products\ProductConfigurationController;
 use App\Http\Controllers\Api\V1\Products\ProductController;
 use App\Http\Controllers\Api\V1\Products\ProductSyncController;
 use App\Http\Controllers\Api\V1\Products\ProductVariantController;
+use App\Http\Controllers\Api\V1\Verification\QrVerificationController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
@@ -49,6 +50,7 @@ Route::prefix('v1')->group(function (): void {
         Route::get('label-templates/effective', [LabelTemplateController::class, 'effective'])->middleware('permission:label_templates.view');
         Route::get('sync/label-templates', [LabelTemplateController::class, 'sync'])->middleware('permission:app.login');
         Route::post('label-templates/app-default', [LabelTemplateController::class, 'appDefault'])->middleware('permission:app.login');
+        Route::post('qr/verifications', [QrVerificationController::class, 'store'])->middleware('permission:app.login');
         Route::post('label-templates/{label_template}/duplicate', [LabelTemplateController::class, 'duplicate'])->middleware('permission:label_templates.manage');
         Route::post('label-templates/{label_template}/archive', [LabelTemplateController::class, 'archive'])->middleware('permission:label_templates.manage');
         Route::post('label-templates/{label_template}/rollback', [LabelTemplateController::class, 'rollback'])->middleware('permission:label_templates.rollback');

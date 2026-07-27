@@ -22,6 +22,7 @@ import '../../labels/data/label_template_repository.dart';
 import '../../labels/domain/label_template_models.dart';
 import '../../products/data/product_repository.dart';
 import '../../products/domain/product_models.dart';
+import '../../verification/data/qr_verification_repository.dart';
 import '../data/production_repository.dart';
 import '../data/scale_adapters.dart';
 import '../domain/scale_models.dart';
@@ -892,6 +893,37 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
         _showCornerMessage(printerMessage, error: true);
         return;
       }
+      String? qrValue;
+      if (AppEdition.webManagedLabels && _templateHasQr(activeTemplate)) {
+        try {
+          qrValue = await const QrVerificationRepository().createPublicUrl(
+            sourceTransactionId: saved.id,
+            productId: product.id,
+            variantId: saved.variantId,
+            productName: product.name,
+            variantName: selectedVariant?.name,
+            variantCode: selectedVariant?.variantCode,
+            serialNumber: saved.serialNumber,
+            barcodeValue: saved.barcodeValue,
+            grossWeight: saved.grossWeight,
+            tareWeight: saved.tareWeight,
+            netWeight: saved.netWeight,
+            pieceQuantity: saved.pieceQuantity,
+            unit: saved.unit,
+            printedAt: saved.capturedAt,
+            dynamicValues: Map<String, dynamic>.from(dynamicValues),
+            productRaw: Map<String, dynamic>.from(product.raw),
+          );
+        } catch (error) {
+          if (!mounted) return;
+          setState(() {
+            printerStatus = PrinterConnectionStatus.connected;
+            printerMessage = 'QR verification could not be created: $error';
+          });
+          _showCornerMessage(printerMessage, error: true);
+          return;
+        }
+      }
       final adminCompanyName = await ApiSession.companyName();
       final result = await printerAdapter.print(
         PrintJob(
@@ -904,6 +936,7 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
             'variant_name': null,
             'serial_number': saved.serialNumber,
             'barcode_value': saved.barcodeValue,
+            'qr_value': qrValue,
             'gross_weight': saved.grossWeight,
             'tare_weight': saved.tareWeight,
             'net_weight': saved.netWeight,
@@ -943,6 +976,18 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
       });
       _showCornerMessage(printerMessage, error: true);
     }
+  }
+
+  bool _templateHasQr(LabelTemplateConfig? template) {
+    final elements = template?.templateJson['elements'];
+    if (elements is! List) return false;
+
+    return elements.any(
+      (element) =>
+          element is Map &&
+          (element['type']?.toString() == 'qr' ||
+              element['type']?.toString() == 'qrcode'),
+    );
   }
 
   Future<bool> _printerStillConnected() async {

@@ -165,6 +165,72 @@ void main() {
     expect(tspl, isNot(contains('"DM19C3"')));
   });
 
+  test('Web Label TSPL emits a 203-DPI QR command without changing barcode', () {
+    final tspl = BluetoothThermalPrinterAdapter(qrPrintingEnabled: true).debugTspl(
+      const PrintJob(
+        jobId: 'job-secure-qr',
+        template: {
+          'widthMm': 75,
+          'heightMm': 75,
+          'elements': [
+            {
+              'type': 'qr',
+              'bindingKey': 'qr.value',
+              'x': 48,
+              'y': 4,
+              'width': 22,
+              'height': 22,
+              'rotation': 0,
+            },
+            {'type': 'barcode', 'x': 5, 'y': 52, 'width': 65, 'height': 17},
+          ],
+        },
+        data: {
+          'qr_value':
+              'https://erp.puniterp.com/verify/AbCdEfGhIjKlMnOpQrStUvWxYz1234567890ABCDEFGHIJ',
+          'barcode_value': 'PHK123',
+        },
+      ),
+    );
+
+    expect(
+      tspl,
+      contains('QRCODE 404,52,M,3,A,0,M2,S7,"https://erp.puniterp.com/verify/'),
+    );
+    expect(tspl, contains('BARCODE '));
+  });
+
+  test('Classic edition skips QR elements and preserves barcode output', () {
+    final tspl = BluetoothThermalPrinterAdapter(qrPrintingEnabled: false)
+        .debugTspl(
+          const PrintJob(
+            jobId: 'job-classic-no-qr',
+            template: {
+              'widthMm': 75,
+              'heightMm': 75,
+              'elements': [
+                {
+                  'type': 'qr',
+                  'bindingKey': 'qr.value',
+                  'x': 48,
+                  'y': 4,
+                  'width': 22,
+                  'height': 22,
+                },
+                {'type': 'barcode', 'x': 5, 'y': 52, 'width': 65, 'height': 17},
+              ],
+            },
+            data: {
+              'qr_value': 'https://erp.puniterp.com/verify/token',
+              'barcode_value': 'PHK123',
+            },
+          ),
+        );
+
+    expect(tspl, isNot(contains('QRCODE ')));
+    expect(tspl, contains('BARCODE '));
+  });
+
   test('TSPL image element is emitted as raw bitmap bytes', () {
     final image = img.Image(width: 8, height: 8);
     img.fill(image, color: img.ColorRgb8(255, 255, 255));

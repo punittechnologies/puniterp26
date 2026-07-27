@@ -7,7 +7,7 @@ use Illuminate\Validation\ValidationException;
 class LabelTemplateValidator
 {
     public const ELEMENT_TYPES = [
-        'text', 'binding_text', 'barcode', 'qr', 'image', 'line', 'rectangle',
+        'text', 'binding_text', 'barcode', 'qr', 'qrcode', 'image', 'line', 'rectangle',
     ];
 
     public function validate(array $template, string $tenantId): array
@@ -28,6 +28,10 @@ class LabelTemplateValidator
 
         if (collect($template['elements'])->where('type', 'barcode')->count() > 1) {
             throw ValidationException::withMessages(['template_json.elements' => 'Only one barcode element is allowed per label template.']);
+        }
+
+        if (collect($template['elements'])->filter(fn (array $element): bool => in_array($element['type'] ?? null, ['qr', 'qrcode'], true))->count() > 1) {
+            throw ValidationException::withMessages(['template_json.elements' => 'Only one QR verification element is allowed per label template.']);
         }
 
         return $this->warnings($template, $tenantId);
@@ -64,6 +68,10 @@ class LabelTemplateValidator
             $warnings[] = ['type' => 'single_barcode_only'];
         }
 
+        if (collect($elements)->filter(fn (array $element): bool => in_array($element['type'] ?? null, ['qr', 'qrcode'], true))->count() > 1) {
+            $warnings[] = ['type' => 'single_qr_only'];
+        }
+
         for ($i = 0; $i < count($elements); $i++) {
             for ($j = $i + 1; $j < count($elements); $j++) {
                 if ($this->overlaps($elements[$i], $elements[$j])) {
@@ -85,6 +93,13 @@ class LabelTemplateValidator
             if (! is_numeric($element[$number] ?? null)) {
                 throw ValidationException::withMessages(["template_json.elements.{$index}.{$number}" => 'Position and size values are required.']);
             }
+        }
+
+        if (in_array($element['type'] ?? null, ['qr', 'qrcode'], true)
+            && ((float) $element['width'] < 15 || (float) $element['height'] < 15)) {
+            throw ValidationException::withMessages([
+                "template_json.elements.{$index}" => 'QR verification elements must be at least 15 × 15 mm for reliable scanning.',
+            ]);
         }
     }
 
