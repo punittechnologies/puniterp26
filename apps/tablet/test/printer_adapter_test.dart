@@ -165,39 +165,44 @@ void main() {
     expect(tspl, isNot(contains('"DM19C3"')));
   });
 
-  test('Web Label TSPL emits a 203-DPI QR command without changing barcode', () {
-    final tspl = BluetoothThermalPrinterAdapter(qrPrintingEnabled: true).debugTspl(
-      const PrintJob(
-        jobId: 'job-secure-qr',
-        template: {
-          'widthMm': 75,
-          'heightMm': 75,
-          'elements': [
-            {
-              'type': 'qr',
-              'bindingKey': 'qr.value',
-              'x': 48,
-              'y': 4,
-              'width': 22,
-              'height': 22,
-              'rotation': 0,
-            },
-            {'type': 'barcode', 'x': 5, 'y': 52, 'width': 65, 'height': 17},
-          ],
-        },
-        data: {
-          'qr_value':
-              'https://erp.puniterp.com/verify/AbCdEfGhIjKlMnOpQrStUvWxYz1234567890ABCDEFGHIJ',
-          'barcode_value': 'PHK123',
-        },
-      ),
+  test('Web Label emits a firmware-safe QR bitmap without changing barcode', () {
+    final adapter = BluetoothThermalPrinterAdapter(qrPrintingEnabled: true);
+    const job = PrintJob(
+      jobId: 'job-secure-qr',
+      template: {
+        'widthMm': 75,
+        'heightMm': 75,
+        'elements': [
+          {
+            'type': 'qr',
+            'bindingKey': 'qr.value',
+            'x': 48,
+            'y': 4,
+            'width': 22,
+            'height': 22,
+            'rotation': 0,
+          },
+          {'type': 'barcode', 'x': 5, 'y': 52, 'width': 65, 'height': 17},
+        ],
+      },
+      data: {
+        'qr_value':
+            'https://erp.puniterp.com/verify/AbCdEfGhIjKlMnOpQrStUvWxYz1234567890ABCDEFGHIJ',
+        'barcode_value': 'PHK123',
+      },
     );
+    final tspl = adapter.debugTspl(job);
+    final bytes = adapter.debugTsplBytes(job);
 
-    expect(
-      tspl,
-      contains('QRCODE 404,52,M,3,A,0,M2,S7,"https://erp.puniterp.com/verify/'),
-    );
+    expect(tspl, contains('BITMAP '));
+    expect(tspl, contains('bitmap bytes>'));
+    expect(tspl, isNot(contains('QRCODE ')));
     expect(tspl, contains('BARCODE '));
+    expect(bytes, containsAllInOrder(ascii.encode('BITMAP ')));
+    expect(
+      latin1.decode(bytes, allowInvalid: true),
+      isNot(contains('https://erp.puniterp.com/verify/')),
+    );
   });
 
   test('Classic edition skips QR elements and preserves barcode output', () {

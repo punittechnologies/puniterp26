@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:image/image.dart' as img;
 import 'package:permission_handler/permission_handler.dart';
+import 'package:qr/qr.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/config/app_edition.dart';
@@ -680,20 +681,7 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
         if (value.isEmpty) {
           continue;
         }
-        final widthDots = _dots(element['width']).clamp(48, 832);
-        final heightDots = _dots(element['height']).clamp(48, 832);
-        final cellWidth = (min(widthDots, heightDots) ~/ 45).clamp(2, 8);
-        final estimatedSize = cellWidth * 45;
-        final x =
-            _dots(element['x']) +
-            ((widthDots - estimatedSize).clamp(0, widthDots) ~/ 2);
-        final y =
-            _dots(element['y']) +
-            ((heightDots - estimatedSize).clamp(0, heightDots) ~/ 2);
-        final rotation = _qrRotation(_num(element['rotation']) ?? 0);
-        lines.add(
-          'QRCODE $x,$y,M,$cellWidth,A,$rotation,M2,S7,"${_escape(value)}"',
-        );
+        lines.add(_qrBitmapTspl(element, value));
         continue;
       }
 
@@ -934,14 +922,6 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
     return parsed.toStringAsFixed(3);
   }
 
-  int _qrRotation(num value) {
-    final normalized = ((value.round() % 360) + 360) % 360;
-    if (normalized >= 315 || normalized < 45) return 0;
-    if (normalized < 135) return 90;
-    if (normalized < 225) return 180;
-    return 270;
-  }
-
   int _dots(Object? mm) => ((_num(mm) ?? 0) * 8).round();
 
   int _alignedX(
@@ -1043,6 +1023,46 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
       'BITMAP $x,$y,$bytesPerRow,$height,0,',
       Uint8List.fromList(bitmapBytes),
     );
+  }
+
+  _BitmapTspl _qrBitmapTspl(Map element, String value) {
+    final qrCode = QrCode(
+      payload: QrPayload.fromString(value),
+      errorCorrectLevel: QrErrorCorrectLevel.medium,
+    );
+    final qrImage = QrImage(qrCode);
+    const quietModules = 4;
+    final totalModules = qrImage.moduleCount + (quietModules * 2);
+    final widthDots = _dots(element['width']).clamp(48, 832);
+    final heightDots = _dots(element['height']).clamp(48, 832);
+    final cellWidth = (min(widthDots, heightDots) ~/ totalModules).clamp(2, 8);
+    final qrSizeDots = totalModules * cellWidth;
+    final bytesPerRow = (qrSizeDots + 7) ~/ 8;
+    final packedWidth = bytesPerRow * 8;
+    final data = Uint8List(bytesPerRow * qrSizeDots);
+
+    for (var moduleY = 0; moduleY < qrImage.moduleCount; moduleY++) {
+      for (var moduleX = 0; moduleX < qrImage.moduleCount; moduleX++) {
+        if (!qrImage.isDark(moduleY, moduleX)) continue;
+        final startX = (moduleX + quietModules) * cellWidth;
+        final startY = (moduleY + quietModules) * cellWidth;
+        for (var pixelY = 0; pixelY < cellWidth; pixelY++) {
+          final rowOffset = (startY + pixelY) * bytesPerRow;
+          for (var pixelX = 0; pixelX < cellWidth; pixelX++) {
+            final x = startX + pixelX;
+            data[rowOffset + (x ~/ 8)] |= 0x80 >> (x % 8);
+          }
+        }
+      }
+    }
+
+    final x =
+        _dots(element['x']) +
+        ((widthDots - packedWidth).clamp(0, widthDots) ~/ 2);
+    final y =
+        _dots(element['y']) +
+        ((heightDots - qrSizeDots).clamp(0, heightDots) ~/ 2);
+    return _BitmapTspl('BITMAP $x,$y,$bytesPerRow,$qrSizeDots,0,', data);
   }
 
   num? _num(Object? value) {
