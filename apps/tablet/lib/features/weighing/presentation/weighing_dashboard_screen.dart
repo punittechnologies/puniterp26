@@ -895,30 +895,43 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
       }
       String? qrValue;
       if (AppEdition.webManagedLabels && _templateHasQr(activeTemplate)) {
-        try {
-          qrValue = await const QrVerificationRepository().createPublicUrl(
-            sourceTransactionId: saved.id,
-            productId: product.id,
-            variantId: saved.variantId,
-            productName: product.name,
-            variantName: selectedVariant?.name,
-            variantCode: selectedVariant?.variantCode,
-            serialNumber: saved.serialNumber,
-            barcodeValue: saved.barcodeValue,
-            grossWeight: saved.grossWeight,
-            tareWeight: saved.tareWeight,
-            netWeight: saved.netWeight,
-            pieceQuantity: saved.pieceQuantity,
-            unit: saved.unit,
-            printedAt: saved.capturedAt,
-            dynamicValues: Map<String, dynamic>.from(dynamicValues),
-            productRaw: Map<String, dynamic>.from(product.raw),
-          );
-        } catch (error) {
+        Object? qrError;
+        for (var attempt = 1; attempt <= 3 && qrValue == null; attempt++) {
+          try {
+            qrValue = await const QrVerificationRepository().createPublicUrl(
+              sourceTransactionId: saved.id,
+              productId: product.id,
+              variantId: saved.variantId,
+              productName: product.name,
+              variantName: selectedVariant?.name,
+              variantCode: selectedVariant?.variantCode,
+              serialNumber: saved.serialNumber,
+              barcodeValue: saved.barcodeValue,
+              grossWeight: saved.grossWeight,
+              tareWeight: saved.tareWeight,
+              netWeight: saved.netWeight,
+              pieceQuantity: saved.pieceQuantity,
+              unit: saved.unit,
+              printedAt: saved.capturedAt,
+              dynamicValues: Map<String, dynamic>.from(dynamicValues),
+              productRaw: Map<String, dynamic>.from(product.raw),
+            );
+          } catch (error) {
+            qrError = error;
+            if (attempt == 1) {
+              await syncQueueService.retryPending(passes: 1);
+            }
+            if (attempt < 3) {
+              await Future<void>.delayed(Duration(milliseconds: 500 * attempt));
+            }
+          }
+        }
+        if (qrValue == null) {
           if (!mounted) return;
           setState(() {
             printerStatus = PrinterConnectionStatus.connected;
-            printerMessage = 'QR verification could not be created: $error';
+            printerMessage =
+                'QR verification failed after 3 attempts: $qrError. Label was not printed to prevent an invalid QR.';
           });
           _showCornerMessage(printerMessage, error: true);
           return;

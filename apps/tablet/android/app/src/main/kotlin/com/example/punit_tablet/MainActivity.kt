@@ -80,6 +80,17 @@ class MainActivity : FlutterActivity() {
                     val bytes = args["bytes"] as? ByteArray ?: ByteArray(0)
                     runPrinterIo(result) { tvsPrintRawBytes(bytes) }
                 }
+                "printRawTsplBytesWithQr" -> {
+                    val args = call.arguments as? Map<*, *> ?: emptyMap<String, Any?>()
+                    val bytes = args["bytes"] as? ByteArray ?: ByteArray(0)
+                    val qrX = args["qrX"] as? Int ?: 0
+                    val qrY = args["qrY"] as? Int ?: 0
+                    val qrCellWidth = args["qrCellWidth"] as? Int ?: 3
+                    val qrValue = args["qrValue"]?.toString() ?: ""
+                    runPrinterIo(result) {
+                        tvsPrintRawBytesWithQr(bytes, qrX, qrY, qrCellWidth, qrValue)
+                    }
+                }
                 else -> result.notImplemented()
             }
         }
@@ -509,6 +520,46 @@ class MainActivity : FlutterActivity() {
             }
         } catch (error: Throwable) {
             mapOf("ok" to false, "code" to -13, "message" to (error.message ?: error.toString()))
+        }
+    }
+
+    private fun tvsPrintRawBytesWithQr(
+        bytes: ByteArray,
+        qrX: Int,
+        qrY: Int,
+        qrCellWidth: Int,
+        qrValue: String
+    ): Map<String, Any> {
+        ensureTvsSdkLoaded()
+        val printer = tvsPrinter
+        if (!tvsConnected || printer == null) {
+            return mapOf("ok" to false, "code" to -10, "message" to "TVS native printer is not connected.")
+        }
+        if (bytes.isEmpty() || qrValue.isBlank()) {
+            return mapOf("ok" to false, "code" to -12, "message" to "QR label data was not generated.")
+        }
+
+        return try {
+            var code = printer.WritePort(bytes, bytes.size)
+            if (code != 0) return failPrint(code, "WritePort QR template")
+
+            code = printer.PrintBarcodeQR(
+                qrX,
+                qrY,
+                0,
+                qrValue,
+                'M',
+                qrCellWidth.coerceIn(2, 8),
+                2
+            )
+            if (code != 0) return failPrint(code, "PrintBarcodeQR")
+
+            code = printer.PrintLabel(1, 1)
+            if (code != 0) return failPrint(code, "PrintLabel QR template")
+
+            mapOf("ok" to true, "code" to 0, "message" to "TVS label with QR printed.")
+        } catch (error: Throwable) {
+            mapOf("ok" to false, "code" to -14, "message" to (error.message ?: error.toString()))
         }
     }
 

@@ -343,9 +343,22 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
 
   Future<PrintResult> _printNative(PrintJob job) async {
     try {
+      final qrSpec = qrPrintingEnabled ? _qrPrintSpec(job) : null;
       final response = await _tvsChannel.invokeMethod<Map<dynamic, dynamic>>(
-        'printRawTsplBytes',
-        {'bytes': _tsplBytes(job)},
+        qrSpec == null ? 'printRawTsplBytes' : 'printRawTsplBytesWithQr',
+        {
+          'bytes': _tsplBytes(
+            job,
+            renderQr: qrSpec == null,
+            includePrint: qrSpec == null,
+          ),
+          if (qrSpec != null) ...{
+            'qrX': qrSpec.x,
+            'qrY': qrSpec.y,
+            'qrCellWidth': qrSpec.cellWidth,
+            'qrValue': qrSpec.value,
+          },
+        },
       );
       final ok = response?['ok'] == true;
       return PrintResult(
@@ -543,7 +556,11 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
     return advertisedName.trim();
   }
 
-  Uint8List _tsplBytes(PrintJob job) {
+  Uint8List _tsplBytes(
+    PrintJob job, {
+    bool renderQr = true,
+    bool includePrint = true,
+  }) {
     final template = job.template;
     final widthMm = _num(template['widthMm'])?.round() ?? 75;
     final heightMm = _num(template['heightMm'])?.round() ?? 75;
@@ -552,7 +569,14 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
         : const <Map>[];
     if (elements.isNotEmpty) {
       return _encodeTsplParts(
-        _tsplFromTemplateParts(job, widthMm, heightMm, elements),
+        _tsplFromTemplateParts(
+          job,
+          widthMm,
+          heightMm,
+          elements,
+          renderQr: renderQr,
+          includePrint: includePrint,
+        ),
       );
     }
 
@@ -646,8 +670,10 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
     PrintJob job,
     int widthMm,
     int heightMm,
-    List<Map> elements,
-  ) {
+    List<Map> elements, {
+    bool renderQr = true,
+    bool includePrint = true,
+  }) {
     final data = job.data;
     final lines = <Object>[
       'SIZE $widthMm mm,$heightMm mm',
@@ -671,7 +697,7 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
     for (final element in ordered) {
       final type = element['type']?.toString();
       if (type == 'qr' || type == 'qrcode') {
-        if (!qrPrintingEnabled) {
+        if (!qrPrintingEnabled || !renderQr) {
           continue;
         }
         final value = _bindingValue(
@@ -788,8 +814,47 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
       );
     }
 
-    lines.addAll(['PRINT 1,1', '']);
+    if (includePrint) {
+      lines.addAll(['PRINT 1,1', '']);
+    }
     return lines;
+  }
+
+  _QrPrintSpec? _qrPrintSpec(PrintJob job) {
+    final elements = job.template['elements'];
+    if (elements is! List) return null;
+
+    for (final raw in elements) {
+      if (raw is! Map) continue;
+      final type = raw['type']?.toString().trim().toLowerCase();
+      if (type != 'qr' && type != 'qrcode') continue;
+      final value = _bindingValue(
+        raw['bindingKey']?.toString() ?? 'qr.value',
+        job.data,
+      );
+      if (value.isEmpty) return null;
+
+      final qrCode = QrCode(
+        payload: QrPayload.fromString(value),
+        errorCorrectLevel: QrErrorCorrectLevel.medium,
+      );
+      const quietModules = 4;
+      final totalModules = qrCode.moduleCount + (quietModules * 2);
+      final widthDots = _dots(raw['width']).clamp(48, 832);
+      final heightDots = _dots(raw['height']).clamp(48, 832);
+      final cellWidth = (min(widthDots, heightDots) ~/ totalModules).clamp(
+        2,
+        8,
+      );
+      final qrSizeDots = qrCode.moduleCount * cellWidth;
+      final x =
+          _dots(raw['x']) + ((widthDots - qrSizeDots).clamp(0, widthDots) ~/ 2);
+      final y =
+          _dots(raw['y']) +
+          ((heightDots - qrSizeDots).clamp(0, heightDots) ~/ 2);
+      return _QrPrintSpec(x: x, y: y, cellWidth: cellWidth, value: value);
+    }
+    return null;
   }
 
   Uint8List _encodeTsplParts(List<Object> parts) {
@@ -1114,6 +1179,20 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
 
   @visibleForTesting
   Uint8List debugTsplBytes(PrintJob job) => _tsplBytes(job);
+
+  Uint8List debugNativeTsplBytes(PrintJob job) =>
+      _tsplBytes(job, renderQr: false, includePrint: false);
+
+  Map<String, Object>? debugNativeQrSpec(PrintJob job) {
+    final spec = _qrPrintSpec(job);
+    if (spec == null) return null;
+    return {
+      'x': spec.x,
+      'y': spec.y,
+      'cellWidth': spec.cellWidth,
+      'value': spec.value,
+    };
+  }
 }
 
 extension on String {
@@ -1125,6 +1204,20 @@ class _BitmapTspl {
 
   final String prefix;
   final Uint8List data;
+}
+
+class _QrPrintSpec {
+  const _QrPrintSpec({
+    required this.x,
+    required this.y,
+    required this.cellWidth,
+    required this.value,
+  });
+
+  final int x;
+  final int y;
+  final int cellWidth;
+  final String value;
 }
 
 class _BarcodeLayout {

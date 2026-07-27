@@ -205,6 +205,47 @@ void main() {
     );
   });
 
+  test('TVS native path leaves QR and final print to the vendor SDK', () {
+    final adapter = BluetoothThermalPrinterAdapter(qrPrintingEnabled: true);
+    const job = PrintJob(
+      jobId: 'job-native-secure-qr',
+      template: {
+        'widthMm': 75,
+        'heightMm': 75,
+        'elements': [
+          {
+            'type': 'qr',
+            'bindingKey': 'qr.value',
+            'x': 50,
+            'y': 55,
+            'width': 17.5,
+            'height': 17.5,
+          },
+          {'type': 'barcode', 'x': 5, 'y': 45, 'width': 40, 'height': 17},
+        ],
+      },
+      data: {
+        'qr_value':
+            'https://erp.puniterp.com/verify/AbCdEfGhIjKlMnOpQrStUvWxYz1234567890ABCDEFGHIJ',
+        'barcode_value': 'PHK123',
+      },
+    );
+
+    final nativeTspl = latin1.decode(
+      adapter.debugNativeTsplBytes(job),
+      allowInvalid: true,
+    );
+    final qrSpec = adapter.debugNativeQrSpec(job);
+
+    expect(nativeTspl, contains('BARCODE '));
+    expect(nativeTspl, isNot(contains('BITMAP ')));
+    expect(nativeTspl, isNot(contains('QRCODE ')));
+    expect(nativeTspl, isNot(contains('PRINT 1,1')));
+    expect(qrSpec, isNotNull);
+    expect(qrSpec!['value'], contains('/verify/'));
+    expect(qrSpec['cellWidth'], inInclusiveRange(2, 8));
+  });
+
   test('Classic edition skips QR elements and preserves barcode output', () {
     final tspl = BluetoothThermalPrinterAdapter(qrPrintingEnabled: false)
         .debugTspl(
