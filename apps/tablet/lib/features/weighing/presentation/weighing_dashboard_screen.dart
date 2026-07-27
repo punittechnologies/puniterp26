@@ -13,6 +13,7 @@ import '../../../core/api/api_session.dart';
 import '../../../core/config/app_edition.dart';
 import '../../../core/database/local_database.dart';
 import '../../../services/devices/android_bluetooth_settings.dart';
+import '../../../services/devices/app_device_session.dart';
 import '../../../services/devices/bluetooth_thermal_printer_adapter.dart';
 import '../../../services/devices/printer_adapter.dart';
 import '../../../services/sync/sync_queue_service.dart';
@@ -78,6 +79,7 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
   String printerMessage = 'Printer not connected';
   String scaleMessage = 'Scale not connected';
   bool usingSimulator = false;
+  bool refreshing = false;
   final Map<String, TextEditingController> fieldControllers = {};
   final Map<String, String> dynamicValues = {};
   final TextEditingController manualTareController = TextEditingController();
@@ -124,13 +126,17 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
     productionRepository = ProductionRepository(database: database);
     inventoryRepository = InventoryRepository(database);
     labelRepository = LabelTemplateRepository(database: database);
-    printerAdapter = BluetoothThermalPrinterAdapter();
+    printerAdapter = AppEdition.webManagedLabels
+        ? AppDeviceSession.instance.printerAdapter
+        : BluetoothThermalPrinterAdapter();
     bluetoothSettings = const AndroidBluetoothSettings();
     syncQueueService = SyncQueueService(database);
-    scaleManager = ScaleConnectionManager(
-      transport: ClassicSppTransport(),
-      profile: scaleProfiles.first,
-    );
+    scaleManager = AppEdition.webManagedLabels
+        ? AppDeviceSession.instance.scaleManager
+        : ScaleConnectionManager(
+            transport: ClassicSppTransport(),
+            profile: scaleProfiles.first,
+          );
     scale = SimulatedScaleAdapter();
     controller = WeighingController(
       ruleResolver: WeightRuleResolver(),
@@ -150,14 +156,18 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
       controller.dispose();
     }
     manualTareController.dispose();
-    scale.disconnect();
+    if (!AppEdition.webManagedLabels) {
+      scale.disconnect();
+    }
     super.dispose();
   }
 
   Future<void> _connectScale() async {
     await subscription?.cancel();
     await statusSubscription?.cancel();
-    await scale.disconnect();
+    if (!AppEdition.webManagedLabels) {
+      await scale.disconnect();
+    }
 
     final savedDevice = await scaleManager.savedDevice();
     final savedProfile = await scaleManager.savedProfile();
@@ -175,19 +185,36 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
       return;
     }
 
-    final bluetooth = BluetoothScaleAdapter(
-      transport: ClassicSppTransport(),
-      profile: savedProfile,
-      deviceId: savedDevice.id,
-    );
-    scale = bluetooth;
-    usingSimulator = false;
-    statusSubscription = bluetooth.statusStream.listen((status) {
-      if (mounted) setState(() => scaleStatus = status);
-    });
-    subscription = bluetooth.readings.listen(_onReading);
     try {
-      await bluetooth.connect();
+      final BluetoothScaleAdapter bluetooth;
+      if (AppEdition.webManagedLabels) {
+        final deviceSession = AppDeviceSession.instance;
+        subscription = deviceSession.readings.listen(_onReading);
+        statusSubscription = deviceSession.scaleStatuses.listen((status) {
+          if (mounted) setState(() => scaleStatus = status);
+        });
+        bluetooth =
+            await deviceSession.connectSavedScale() ??
+            await deviceSession.connectScale(
+              device: savedDevice,
+              profile: savedProfile,
+              autoReconnect: true,
+              saveSelection: false,
+            );
+      } else {
+        bluetooth = BluetoothScaleAdapter(
+          transport: ClassicSppTransport(),
+          profile: savedProfile,
+          deviceId: savedDevice.id,
+        );
+        subscription = bluetooth.readings.listen(_onReading);
+        statusSubscription = bluetooth.statusStream.listen((status) {
+          if (mounted) setState(() => scaleStatus = status);
+        });
+        await bluetooth.connect();
+      }
+      scale = bluetooth;
+      usingSimulator = false;
       if (mounted) {
         setState(() {
           scaleStatus = bluetooth.status;
@@ -201,6 +228,30 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
           scaleMessage = 'Scale connection failed: $error';
         });
       }
+    }
+  }
+
+  Future<void> _refreshMainScreen() async {
+    if (refreshing) return;
+    setState(() => refreshing = true);
+    try {
+      if (AppEdition.webManagedLabels) {
+        await AppDeviceSession.instance.refreshConnections();
+      } else {
+        await _connectScale();
+        await _loadPrinter();
+      }
+      await _load();
+      await _loadPrinter();
+      if (mounted) {
+        _showCornerMessage('Products, label and device connections refreshed.');
+      }
+    } catch (error) {
+      if (mounted) {
+        _showCornerMessage('Refresh failed: $error', error: true);
+      }
+    } finally {
+      if (mounted) setState(() => refreshing = false);
     }
   }
 
@@ -226,6 +277,7 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
     final loadedProducts = await productRepository.cachedProducts();
     final loadedFields = await _weighingFields();
     final pending = await syncQueueService.pendingCount();
+    if (!mounted) return;
     setState(() {
       products = loadedProducts;
       fields = loadedFields;
@@ -703,6 +755,7 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
   }
 
   Future<void> _onReading(ScaleReading value) async {
+    if (!mounted) return;
     final computed = controller.compute(
       reading: value,
       product: selectedProduct,
@@ -1262,6 +1315,18 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
             fit: BoxFit.contain,
           ),
           const Spacer(),
+          IconButton(
+            tooltip: 'Refresh data and device connections',
+            onPressed: refreshing ? null : _refreshMainScreen,
+            icon: refreshing
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh_rounded),
+          ),
+          const SizedBox(width: 4),
           _DeviceBadge(
             label: 'Scale',
             connected: _scaleConnected,
@@ -1316,6 +1381,17 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
             fit: BoxFit.contain,
           ),
           const Spacer(),
+          IconButton(
+            tooltip: 'Refresh data and connections',
+            onPressed: refreshing ? null : _refreshMainScreen,
+            icon: refreshing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh_rounded),
+          ),
           _DeviceIcon(
             connected: _scaleConnected,
             icon: Icons.sensors_rounded,

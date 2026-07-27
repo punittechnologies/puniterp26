@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../../core/config/app_edition.dart';
+import '../../../services/devices/app_device_session.dart';
 import '../../../services/devices/bluetooth_thermal_printer_adapter.dart';
 import '../../../services/devices/printer_adapter.dart';
 
@@ -13,7 +15,7 @@ class PrinterSettingsScreen extends StatefulWidget {
 }
 
 class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
-  final adapter = BluetoothThermalPrinterAdapter();
+  late final BluetoothThermalPrinterAdapter adapter;
 
   List<PrinterDevice> printers = [];
   PrinterDevice? selectedPrinter;
@@ -24,6 +26,9 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
   @override
   void initState() {
     super.initState();
+    adapter = AppEdition.webManagedLabels
+        ? AppDeviceSession.instance.printerAdapter
+        : BluetoothThermalPrinterAdapter();
     _load();
   }
 
@@ -60,6 +65,15 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
             ? 'No printers found. For Bluetooth pair first; for TSC USB/Serial connect OTG cable and allow USB permission.'
             : 'Found ${list.length} printer option(s): Bluetooth, USB, and/or Serial.';
       });
+      final connected = await adapter.isConnected();
+      if (mounted && connected) {
+        setState(() {
+          status = PrinterConnectionStatus.connected;
+          message = selectedPrinter == null
+              ? 'Printer remains connected.'
+              : 'Connected to ${selectedPrinter!.name}.';
+        });
+      }
     } catch (error) {
       setState(() {
         status = PrinterConnectionStatus.error;

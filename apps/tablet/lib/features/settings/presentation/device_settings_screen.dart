@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../../core/config/app_edition.dart';
+import '../../../services/devices/app_device_session.dart';
 import '../../weighing/data/scale_adapters.dart';
 import '../../weighing/domain/scale_models.dart';
 
@@ -65,11 +67,15 @@ class _DeviceSettingsScreenState extends State<DeviceSettingsScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    transport = ClassicSppTransport();
-    manager = ScaleConnectionManager(
-      transport: transport,
-      profile: selectedProfile,
-    );
+    transport = AppEdition.webManagedLabels
+        ? AppDeviceSession.instance.scaleTransport
+        : ClassicSppTransport();
+    manager = AppEdition.webManagedLabels
+        ? AppDeviceSession.instance.scaleManager
+        : ScaleConnectionManager(
+            transport: transport,
+            profile: selectedProfile,
+          );
     _loadSaved();
   }
 
@@ -86,7 +92,9 @@ class _DeviceSettingsScreenState extends State<DeviceSettingsScreen>
     readingSubscription?.cancel();
     statusSubscription?.cancel();
     rawSubscription?.cancel();
-    adapter?.disconnect();
+    if (!AppEdition.webManagedLabels) {
+      adapter?.disconnect();
+    }
     super.dispose();
   }
 
@@ -157,32 +165,50 @@ class _DeviceSettingsScreenState extends State<DeviceSettingsScreen>
     }
 
     await _disconnect(silent: true);
-    final next = BluetoothScaleAdapter(
-      transport: transport,
-      profile: selectedProfile,
-      deviceId: device.id,
-    );
+    final next = AppEdition.webManagedLabels
+        ? await AppDeviceSession.instance.connectScale(
+            device: device,
+            profile: selectedProfile,
+            autoReconnect: autoReconnect,
+          )
+        : BluetoothScaleAdapter(
+            transport: transport,
+            profile: selectedProfile,
+            deviceId: device.id,
+          );
     adapter = next;
-    statusSubscription = next.statusStream.listen(
-      (value) => setState(() => status = value),
-    );
-    rawSubscription = next.rawDataStream.listen((value) {
+    final statusStream = AppEdition.webManagedLabels
+        ? AppDeviceSession.instance.scaleStatuses
+        : next.statusStream;
+    final rawStream = AppEdition.webManagedLabels
+        ? AppDeviceSession.instance.rawScaleData
+        : next.rawDataStream;
+    final readingStream = AppEdition.webManagedLabels
+        ? AppDeviceSession.instance.readings
+        : next.readings;
+    statusSubscription = statusStream.listen((value) {
+      if (mounted) setState(() => status = value);
+    });
+    rawSubscription = rawStream.listen((value) {
+      if (!mounted) return;
       setState(() {
         rawLog = '$value\n$rawLog';
         rawLog = rawLog.length > 2000 ? rawLog.substring(0, 2000) : rawLog;
       });
     });
-    readingSubscription = next.readings.listen((value) {
-      setState(() => reading = value);
+    readingSubscription = readingStream.listen((value) {
+      if (mounted) setState(() => reading = value);
     });
 
     try {
-      await next.connect();
-      await manager.save(
-        device: device,
-        profile: selectedProfile,
-        autoReconnect: autoReconnect,
-      );
+      if (!AppEdition.webManagedLabels) {
+        await next.connect();
+        await manager.save(
+          device: device,
+          profile: selectedProfile,
+          autoReconnect: autoReconnect,
+        );
+      }
       setState(() => message = 'Connected to ${device.name}.');
     } catch (error) {
       setState(() => message = 'Connection failed: $error');
@@ -193,7 +219,11 @@ class _DeviceSettingsScreenState extends State<DeviceSettingsScreen>
     await readingSubscription?.cancel();
     await statusSubscription?.cancel();
     await rawSubscription?.cancel();
-    await adapter?.disconnect();
+    if (AppEdition.webManagedLabels) {
+      await AppDeviceSession.instance.disconnectScale();
+    } else {
+      await adapter?.disconnect();
+    }
     adapter = null;
     if (!silent) {
       setState(() {
@@ -205,7 +235,11 @@ class _DeviceSettingsScreenState extends State<DeviceSettingsScreen>
 
   Future<void> _forget() async {
     await _disconnect(silent: true);
-    await manager.forget();
+    if (AppEdition.webManagedLabels) {
+      await AppDeviceSession.instance.forgetScale();
+    } else {
+      await manager.forget();
+    }
     setState(() {
       selectedDevice = null;
       reading = null;

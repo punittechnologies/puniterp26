@@ -15,6 +15,8 @@ import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import androidx.core.app.ActivityCompat
 import com.hoho.android.usbserial.driver.UsbSerialPort
@@ -24,6 +26,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.plugin.common.MethodChannel
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 class MainActivity : FlutterActivity() {
@@ -36,6 +39,8 @@ class MainActivity : FlutterActivity() {
     private var tscSerialPort: UsbSerialPort? = null
     private var tscConnected = false
     private var tscMode = ""
+    private val printerExecutor = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -54,24 +59,26 @@ class MainActivity : FlutterActivity() {
                 "connect" -> {
                     val mac = call.argument<String>("address") ?: ""
                     val language = call.argument<Int>("language") ?: PRINTER_LANGUAGE_BPLA
-                    result.success(tvsConnect(mac, language))
+                    runPrinterIo(result) { tvsConnect(mac, language) }
                 }
                 "disconnect" -> {
-                    result.success(tvsDisconnect())
+                    runPrinterIo(result) { tvsDisconnect() }
                 }
                 "isConnected" -> result.success(tvsConnected)
                 "printLabel" -> {
                     val args = call.arguments as? Map<*, *> ?: emptyMap<String, Any?>()
-                    result.success(tvsPrintLabel(args))
+                    runPrinterIo(result) { tvsPrintLabel(args) }
                 }
                 "printRawTspl" -> {
                     val args = call.arguments as? Map<*, *> ?: emptyMap<String, Any?>()
-                    result.success(tvsPrintRawTspl(args["tspl"]?.toString() ?: ""))
+                    runPrinterIo(result) {
+                        tvsPrintRawTspl(args["tspl"]?.toString() ?: "")
+                    }
                 }
                 "printRawTsplBytes" -> {
                     val args = call.arguments as? Map<*, *> ?: emptyMap<String, Any?>()
                     val bytes = args["bytes"] as? ByteArray ?: ByteArray(0)
-                    result.success(tvsPrintRawBytes(bytes))
+                    runPrinterIo(result) { tvsPrintRawBytes(bytes) }
                 }
                 else -> result.notImplemented()
             }
@@ -82,20 +89,42 @@ class MainActivity : FlutterActivity() {
                 "connect" -> {
                     val id = call.argument<String>("id") ?: ""
                     val baudRate = call.argument<Int>("baudRate") ?: 9600
-                    result.success(tscConnect(id, baudRate))
+                    runPrinterIo(result) { tscConnect(id, baudRate) }
                 }
-                "disconnect" -> result.success(tscDisconnect())
+                "disconnect" -> runPrinterIo(result) { tscDisconnect() }
                 "isConnected" -> result.success(tscConnected)
                 "printRawTspl" -> {
                     val args = call.arguments as? Map<*, *> ?: emptyMap<String, Any?>()
-                    result.success(tscPrintRawTspl(args["tspl"]?.toString() ?: ""))
+                    runPrinterIo(result) {
+                        tscPrintRawTspl(args["tspl"]?.toString() ?: "")
+                    }
                 }
                 "printRawTsplBytes" -> {
                     val args = call.arguments as? Map<*, *> ?: emptyMap<String, Any?>()
                     val bytes = args["bytes"] as? ByteArray ?: ByteArray(0)
-                    result.success(tscPrintRawBytes(bytes))
+                    runPrinterIo(result) { tscPrintRawBytes(bytes) }
                 }
                 else -> result.notImplemented()
+            }
+        }
+    }
+
+    private fun runPrinterIo(
+        result: MethodChannel.Result,
+        operation: () -> Any?
+    ) {
+        printerExecutor.execute {
+            try {
+                val value = operation()
+                mainHandler.post { result.success(value) }
+            } catch (error: Throwable) {
+                mainHandler.post {
+                    result.error(
+                        "printer_io_error",
+                        error.message ?: error.toString(),
+                        null
+                    )
+                }
             }
         }
     }

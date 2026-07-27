@@ -668,14 +668,18 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
         final barcode = _clean(
           data['barcode_value'],
         ).ifEmpty(_clean(data['serial_number']).ifEmpty('PREVIEW'));
+        final barcodeLayout = _barcodeLayout(element, barcode);
         lines.add(
-          'BARCODE ${_dots(element['x'])},${_dots(element['y'])},"128",'
-          '${_dots(element['height']).clamp(28, 72)},0,0,2,2,'
+          'BARCODE ${barcodeLayout.x},${_dots(element['y'])},"128",'
+          '${_dots(element['height']).clamp(28, 72)},0,0,'
+          '${barcodeLayout.moduleWidth},${barcodeLayout.moduleWidth},'
           '"${_limit(barcode, 28)}"',
         );
+        final valueFontSize = 8;
+        final value = _limit(barcode, 24);
         lines.add(
           _text(
-            _dots(element['x']),
+            _alignedX(element, value, valueFontSize, 'center', ''),
             _dots(
               (_num(element['y']) ?? 0) + (_num(element['height']) ?? 16) + 1,
             ),
@@ -732,6 +736,7 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
         _charsForWidth(
           (_num(element['width']) ?? widthMm).toDouble(),
           fontSize,
+          weight,
         ),
       );
       final prefixFontSize = _num(style['prefixFontSize']) ?? fontSize;
@@ -754,13 +759,14 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
             maxChars: _charsForWidth(
               (_num(element['width']) ?? widthMm).toDouble(),
               fontSize,
+              weight,
             ),
           ),
         );
       } else {
         lines.add(
           _text(
-            _alignedX(element, limitedText, fontSize, align),
+            _alignedX(element, limitedText, fontSize, align, weight),
             _dots(element['y']),
             _fontName(fontSize, weight),
             _fontMultiplier(fontSize),
@@ -857,7 +863,11 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
     final fullText = '$limitedPrefix$limitedValue$limitedSuffix';
     if (fullText.isEmpty) return;
 
-    var cursorX = _alignedX(element, fullText, fontSize, align);
+    final fullTextWidth =
+        _estimatedTextWidthDots(limitedPrefix, prefixFontSize, weight) +
+        _estimatedTextWidthDots(limitedValue, fontSize, weight) +
+        _estimatedTextWidthDots(limitedSuffix, suffixFontSize, weight);
+    var cursorX = _alignedXForWidth(element, fullTextWidth, align);
     final y = _dots(element['y']);
     if (limitedPrefix.isNotEmpty) {
       yield _text(
@@ -868,7 +878,7 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
         _fontMultiplier(prefixFontSize),
         limitedPrefix,
       );
-      cursorX += _estimatedTextWidthDots(limitedPrefix, prefixFontSize);
+      cursorX += _estimatedTextWidthDots(limitedPrefix, prefixFontSize, weight);
     }
     if (limitedValue.isNotEmpty) {
       yield _text(
@@ -879,7 +889,7 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
         _fontMultiplier(fontSize),
         limitedValue,
       );
-      cursorX += _estimatedTextWidthDots(limitedValue, fontSize);
+      cursorX += _estimatedTextWidthDots(limitedValue, fontSize, weight);
     }
     if (limitedSuffix.isNotEmpty) {
       yield _text(
@@ -905,8 +915,18 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
 
   int _fontMultiplier(num fontSize) => fontSize >= 13 ? 2 : 1;
 
-  int _estimatedTextWidthDots(String text, num fontSize) =>
-      (text.length * 8 * _fontMultiplier(fontSize)).round();
+  int _estimatedTextWidthDots(String text, num fontSize, [String weight = '']) {
+    final font = _fontName(fontSize, weight);
+    final baseCharacterWidth = switch (font) {
+      '1' => 8,
+      '2' => 12,
+      '3' => 16,
+      '4' => 24,
+      '5' => 32,
+      _ => 8,
+    };
+    return text.length * baseCharacterWidth * _fontMultiplier(fontSize);
+  }
 
   String _weight(Object? value, String unit) {
     final parsed = num.tryParse(value?.toString() ?? '');
@@ -967,15 +987,46 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
 
   int _dots(Object? mm) => ((_num(mm) ?? 0) * 8).round();
 
-  int _alignedX(Map element, String text, num fontSize, String align) {
+  int _alignedX(
+    Map element,
+    String text,
+    num fontSize,
+    String align, [
+    String weight = '',
+  ]) {
+    return _alignedXForWidth(
+      element,
+      _estimatedTextWidthDots(text, fontSize, weight),
+      align,
+    );
+  }
+
+  int _alignedXForWidth(Map element, int contentWidth, String align) {
     final x = _dots(element['x']);
     final width = _dots(element['width']);
     if (align == 'left') return x;
 
-    final estimatedTextWidth = _estimatedTextWidthDots(text, fontSize);
-    final spare = (width - estimatedTextWidth).clamp(0, width);
+    final spare = (width - contentWidth).clamp(0, width);
     if (align == 'right') return x + spare;
     return x + (spare ~/ 2);
+  }
+
+  _BarcodeLayout _barcodeLayout(Map element, String value) {
+    final boxX = _dots(element['x']);
+    final boxWidth = _dots(element['width']).clamp(1, 832);
+    final modules = _estimatedCode128Modules(_limit(value, 28));
+    final moduleWidth = (boxWidth ~/ modules).clamp(1, 2);
+    final printedWidth = modules * moduleWidth;
+    final x = boxX + ((boxWidth - printedWidth).clamp(0, boxWidth) ~/ 2);
+    return _BarcodeLayout(x, moduleWidth);
+  }
+
+  int _estimatedCode128Modules(String value) {
+    // Start, one symbol per Code Set B character, checksum, stop and quiet zones.
+    // The printer may compact numeric runs into Code Set C, which only makes the
+    // barcode slightly narrower; this conservative estimate keeps it inside and
+    // centred within the web-designed element box.
+    return (11 * (value.length + 2)) + 13 + 20;
   }
 
   _BitmapTspl? _imageBitmapTspl(Map element) {
@@ -1042,9 +1093,10 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
     return num.tryParse(value?.toString() ?? '');
   }
 
-  int _charsForWidth(double widthMm, num fontSize) {
-    final divisor = fontSize >= 13 ? 4.4 : 2.2;
-    return (widthMm / divisor).floor().clamp(6, 36);
+  int _charsForWidth(double widthMm, num fontSize, [String weight = '']) {
+    final widthDots = _dots(widthMm);
+    final characterWidth = _estimatedTextWidthDots('M', fontSize, weight);
+    return (widthDots ~/ characterWidth).clamp(1, 64);
   }
 
   String _label(Object? value) =>
@@ -1089,4 +1141,11 @@ class _BitmapTspl {
 
   final String prefix;
   final Uint8List data;
+}
+
+class _BarcodeLayout {
+  const _BarcodeLayout(this.x, this.moduleWidth);
+
+  final int x;
+  final int moduleWidth;
 }

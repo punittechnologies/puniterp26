@@ -115,7 +115,9 @@ class BluetoothScaleAdapter implements ScaleAdapter {
   ScaleConnectionStatus _status = ScaleConnectionStatus.disconnected;
   bool _explicitDisconnect = false;
   Timer? _noDataTimer;
+  Timer? _reconnectTimer;
   int _reconnectAttempt = 0;
+  bool _connectInProgress = false;
 
   @override
   Stream<ScaleReading> get readings => _controller.stream;
@@ -131,20 +133,23 @@ class BluetoothScaleAdapter implements ScaleAdapter {
   Future<void> connect() async {
     if (_status == ScaleConnectionStatus.connected ||
         _status == ScaleConnectionStatus.connecting ||
-        _status == ScaleConnectionStatus.receiving) {
+        _status == ScaleConnectionStatus.receiving ||
+        _connectInProgress) {
       return;
     }
+    _connectInProgress = true;
+    _reconnectTimer?.cancel();
     _explicitDisconnect = false;
     _status = ScaleConnectionStatus.connecting;
     _statusController.add(_status);
-    final devices = await discoverDevices();
-    final target = deviceId ?? devices.firstOrNull;
-    if (target == null) {
-      _status = ScaleConnectionStatus.failed;
-      _statusController.add(_status);
-      return;
-    }
     try {
+      final devices = await discoverDevices();
+      final target = deviceId ?? devices.firstOrNull;
+      if (target == null) {
+        _status = ScaleConnectionStatus.failed;
+        _statusController.add(_status);
+        return;
+      }
       await transport.connect(target);
     } catch (_) {
       _status = transport.status == ScaleConnectionStatus.disabled
@@ -153,6 +158,8 @@ class BluetoothScaleAdapter implements ScaleAdapter {
       _statusController.add(_status);
       _scheduleReconnect();
       return;
+    } finally {
+      _connectInProgress = false;
     }
     _transportStatusSubscription?.cancel();
     _rawSubscription?.cancel();
@@ -185,6 +192,8 @@ class BluetoothScaleAdapter implements ScaleAdapter {
   Future<void> disconnect() async {
     _explicitDisconnect = true;
     _noDataTimer?.cancel();
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     await _subscription?.cancel();
     await _transportStatusSubscription?.cancel();
     await _rawSubscription?.cancel();
@@ -207,6 +216,7 @@ class BluetoothScaleAdapter implements ScaleAdapter {
     for (final packet in _buffer.addBytes(chunk)) {
       final reading = _parser.parse(packet);
       if (reading != null) {
+        _reconnectAttempt = 0;
         _status = ScaleConnectionStatus.receiving;
         _statusController.add(_status);
         _controller.add(
@@ -237,14 +247,24 @@ class BluetoothScaleAdapter implements ScaleAdapter {
   }
 
   void _scheduleReconnect() {
-    if (_explicitDisconnect || deviceId == null) return;
+    if (_explicitDisconnect ||
+        deviceId == null ||
+        _reconnectTimer?.isActive == true ||
+        _connectInProgress) {
+      return;
+    }
     _reconnectAttempt += 1;
     final delayMs = (500 * (1 << (_reconnectAttempt - 1))).clamp(500, 10000);
     _status = ScaleConnectionStatus.reconnecting;
     _statusController.add(_status);
-    Timer(Duration(milliseconds: delayMs), () async {
+    _reconnectTimer = Timer(Duration(milliseconds: delayMs), () async {
+      _reconnectTimer = null;
       if (_explicitDisconnect) return;
-      await disconnect();
+      _noDataTimer?.cancel();
+      await _subscription?.cancel();
+      await _transportStatusSubscription?.cancel();
+      await _rawSubscription?.cancel();
+      await transport.disconnect();
       _explicitDisconnect = false;
       await connect();
     });

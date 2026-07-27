@@ -90,7 +90,51 @@ void main() {
     expect(tspl, contains('PUNIT ERP'));
     expect(tspl, contains('Size: 16'));
     expect(tspl, contains(',"128",'));
-    expect(tspl, contains(',0,0,2,2,'));
+    expect(tspl, contains('BARCODE 140,416,"128",72,0,0,1,1,'));
+  });
+
+  test('TSPL uses real Font 3 metrics when centering bold text', () {
+    final tspl = BluetoothThermalPrinterAdapter().debugTspl(
+      const PrintJob(
+        jobId: 'job-centered-font',
+        template: {
+          'widthMm': 75,
+          'heightMm': 75,
+          'elements': [
+            {
+              'type': 'binding_text',
+              'bindingKey': 'company.name',
+              'x': 5,
+              'y': 4,
+              'width': 65,
+              'height': 6,
+              'style': {
+                'fontSize': 10,
+                'fontWeight': 'bold',
+                'align': 'center',
+              },
+            },
+            {
+              'type': 'barcode',
+              'x': 5,
+              'y': 52,
+              'width': 65,
+              'height': 17,
+            },
+          ],
+        },
+        data: {
+          'company_name': 'PUNIT ERP',
+          'barcode_value': 'PHKS06B99XB',
+        },
+      ),
+    );
+
+    // 65 mm = 520 dots. Font 3 is 16 dots wide, so nine characters
+    // occupy 144 dots and start at 40 + ((520 - 144) / 2) = 228.
+    expect(tspl, contains('TEXT 228,32,"3",0,1,1,"PUNIT ERP"'));
+    expect(tspl, contains('BARCODE 124,416,"128",72,0,0,2,2,'));
+    expect(tspl, contains('TEXT 256,560,"1",0,1,1,"PHKS06B99XB"'));
   });
 
   test('TSPL image element is emitted as raw bitmap bytes', () {
