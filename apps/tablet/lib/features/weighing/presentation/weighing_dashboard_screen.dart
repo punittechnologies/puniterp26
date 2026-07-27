@@ -610,97 +610,6 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
                       message,
                       style: const TextStyle(color: Color(0xFF536685)),
                     ),
-                    if (AppEdition.webManagedLabels) ...[
-                      const SizedBox(height: 12),
-                      const Text(
-                        'QR printer check',
-                        style: TextStyle(fontWeight: FontWeight.w800),
-                      ),
-                      const SizedBox(height: 4),
-                      const Text(
-                        'Connect the TVS printer below. This button becomes active immediately without closing this panel.',
-                        style: TextStyle(color: Color(0xFF536685)),
-                      ),
-                      const SizedBox(height: 8),
-                      FilledButton.icon(
-                        onPressed:
-                            printerStatus ==
-                                    PrinterConnectionStatus.connected &&
-                                !busy
-                            ? () async {
-                                sheetSetState(() {
-                                  busy = true;
-                                  message =
-                                      'Sending a direct QR test through the selected printer connection...';
-                                });
-                                final result = await printerAdapter.print(
-                                  PrintJob(
-                                    jobId:
-                                        'qr_test_${DateTime.now().microsecondsSinceEpoch}',
-                                    template: const {
-                                      'widthMm': 75,
-                                      'heightMm': 75,
-                                      'elements': [
-                                        {
-                                          'type': 'static_text',
-                                          'bindingKey': 'QR PRINTER TEST',
-                                          'x': 20,
-                                          'y': 6,
-                                          'width': 35,
-                                          'height': 6,
-                                          'style': {
-                                            'fontSize': 10,
-                                            'fontWeight': 'bold',
-                                            'align': 'center',
-                                          },
-                                        },
-                                        {
-                                          'type': 'qr',
-                                          'bindingKey': 'qr.value',
-                                          'x': 20,
-                                          'y': 15,
-                                          'width': 35,
-                                          'height': 35,
-                                        },
-                                        {
-                                          'type': 'static_text',
-                                          'bindingKey': 'erp.puniterp.com',
-                                          'x': 15,
-                                          'y': 55,
-                                          'width': 45,
-                                          'height': 6,
-                                          'style': {
-                                            'fontSize': 8,
-                                            'align': 'center',
-                                          },
-                                        },
-                                      ],
-                                    },
-                                    data: const {
-                                      'qr_value': 'https://erp.puniterp.com',
-                                    },
-                                  ),
-                                );
-                                sheetSetState(() {
-                                  busy = false;
-                                  message =
-                                      'QR TEST RESULT: ${result.message ?? result.status}';
-                                });
-                                if (mounted) {
-                                  setState(() {
-                                    printerStatus = result.status == 'failed'
-                                        ? PrinterConnectionStatus.error
-                                        : PrinterConnectionStatus.connected;
-                                    printerMessage =
-                                        'QR TEST RESULT: ${result.message ?? result.status}';
-                                  });
-                                }
-                              }
-                            : null,
-                        icon: const Icon(Icons.qr_code_2_rounded),
-                        label: const Text('PRINT QR TEST'),
-                      ),
-                    ],
                     const SizedBox(height: 18),
                     DropdownButtonFormField<PrinterDevice>(
                       initialValue: printers.contains(selectedPrinter)
@@ -770,7 +679,7 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
                                         busy = false;
                                         selectedPrinter = printer;
                                         message =
-                                            'Connected to ${printer.name}. Tap PRINT QR TEST above.';
+                                            'Connected to ${printer.name}. Tap Test Print below to check text, barcode and QR.';
                                       });
                                     } catch (error) {
                                       sheetSetState(() {
@@ -792,18 +701,55 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
                           ? () async {
                               sheetSetState(() {
                                 busy = true;
-                                message = 'Sending test print...';
+                                message =
+                                    'Sending text, barcode and QR test print...';
                               });
                               final result = await printerAdapter.print(
                                 PrintJob(
                                   jobId:
                                       'test_${DateTime.now().microsecondsSinceEpoch}',
-                                  template: const {},
+                                  template: const {
+                                    'widthMm': 75,
+                                    'heightMm': 75,
+                                    'elements': [
+                                      {
+                                        'type': 'static_text',
+                                        'bindingKey': 'PUNIT PRINTER TEST',
+                                        'x': 10,
+                                        'y': 5,
+                                        'width': 55,
+                                        'height': 7,
+                                        'style': {
+                                          'fontSize': 11,
+                                          'fontWeight': 'bold',
+                                          'align': 'center',
+                                        },
+                                      },
+                                      {
+                                        'type': 'qr',
+                                        'bindingKey': 'qr.value',
+                                        'x': 22,
+                                        'y': 14,
+                                        'width': 31,
+                                        'height': 31,
+                                      },
+                                      {
+                                        'type': 'barcode',
+                                        'bindingKey': 'barcode.value',
+                                        'x': 10,
+                                        'y': 50,
+                                        'width': 55,
+                                        'height': 12,
+                                      },
+                                    ],
+                                  },
                                   data: {
                                     'company_name': 'Punit ERP',
                                     'product_name': 'Printer Test',
                                     'serial_number': 'TEST',
                                     'barcode_value': 'TEST123',
+                                    'qr_value': 'https://erp.puniterp.com',
+                                    '_force_qr_test': true,
                                     'gross_weight': 12.480,
                                     'tare_weight': 0.000,
                                     'net_weight': 12.480,
@@ -827,7 +773,7 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
                             }
                           : null,
                       icon: const Icon(Icons.receipt_long_outlined),
-                      label: const Text('Test Print'),
+                      label: const Text('Test Print (Text + Barcode + QR)'),
                     ),
                   ],
                 ),

@@ -343,7 +343,7 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
 
   Future<PrintResult> _printNative(PrintJob job) async {
     try {
-      final qrSpec = qrPrintingEnabled ? _qrPrintSpec(job) : null;
+      final qrSpec = _qrEnabledFor(job) ? _qrPrintSpec(job) : null;
       final response = await _tvsChannel.invokeMethod<Map<dynamic, dynamic>>(
         qrSpec == null ? 'printRawTsplBytes' : 'printRawTsplBytesWithQr',
         {
@@ -697,7 +697,7 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
     for (final element in ordered) {
       final type = element['type']?.toString();
       if (type == 'qr' || type == 'qrcode') {
-        if (!qrPrintingEnabled || !renderQr) {
+        if (!_qrEnabledFor(job) || !renderQr) {
           continue;
         }
         final value = _bindingValue(
@@ -819,6 +819,9 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
     }
     return lines;
   }
+
+  bool _qrEnabledFor(PrintJob job) =>
+      qrPrintingEnabled || job.data['_force_qr_test'] == true;
 
   _QrPrintSpec? _qrPrintSpec(PrintJob job) {
     final elements = job.template['elements'];

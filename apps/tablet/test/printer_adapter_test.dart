@@ -277,6 +277,44 @@ void main() {
     expect(tspl, contains('BARCODE '));
   });
 
+  test('Test Print can force QR without enabling classic production QR', () {
+    final tspl = BluetoothThermalPrinterAdapter(qrPrintingEnabled: false)
+        .debugTspl(
+          const PrintJob(
+            jobId: 'job-classic-qr-test',
+            template: {
+              'widthMm': 75,
+              'heightMm': 75,
+              'elements': [
+                {
+                  'type': 'qr',
+                  'bindingKey': 'qr.value',
+                  'x': 22,
+                  'y': 14,
+                  'width': 31,
+                  'height': 31,
+                },
+                {
+                  'type': 'barcode',
+                  'x': 10,
+                  'y': 50,
+                  'width': 55,
+                  'height': 12,
+                },
+              ],
+            },
+            data: {
+              'qr_value': 'https://erp.puniterp.com',
+              'barcode_value': 'TEST123',
+              '_force_qr_test': true,
+            },
+          ),
+        );
+
+    expect(tspl, contains('BITMAP '));
+    expect(tspl, contains('BARCODE '));
+  });
+
   test('TSPL image element is emitted as raw bitmap bytes', () {
     final image = img.Image(width: 8, height: 8);
     img.fill(image, color: img.ColorRgb8(255, 255, 255));
