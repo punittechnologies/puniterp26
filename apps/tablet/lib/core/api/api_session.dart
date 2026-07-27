@@ -10,6 +10,7 @@ class ApiSession {
   static const _tokenKey = 'api_access_token';
   static const _deviceIdKey = 'device_id';
   static const _emailKey = 'api_email';
+  static const _accountScopeKey = 'api_account_scope';
   static const defaultBaseUrl = 'https://erp.puniterp.com/api/v1';
 
   static Future<String> baseUrl() async {
@@ -25,6 +26,16 @@ class ApiSession {
   static Future<String?> email() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_emailKey);
+  }
+
+  static Future<String> accountScope() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString(_accountScopeKey) ?? 'signed-out';
+    } catch (_) {
+      // Pure Dart repository tests do not initialize Flutter platform channels.
+      return 'signed-out';
+    }
   }
 
   static Future<String> deviceId() async {
@@ -67,10 +78,20 @@ class ApiSession {
     final accountKey = user['appUsername']?.toString().trim().isNotEmpty == true
         ? user['appUsername'].toString()
         : email;
+    final tenantId = user['tenantId']?.toString().trim();
+    final userId = user['id']?.toString().trim();
+    final accountScope =
+        tenantId != null &&
+            tenantId.isNotEmpty &&
+            userId != null &&
+            userId.isNotEmpty
+        ? '$tenantId:$userId'
+        : '${normalized.toLowerCase()}:${accountKey.toLowerCase()}';
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_baseUrlKey, normalized);
     await prefs.setString(_tokenKey, accessToken);
     await prefs.setString(_emailKey, accountKey);
+    await prefs.setString(_accountScopeKey, accountScope);
     await deviceId();
 
     return ApiClient(baseUrl: normalized, token: accessToken);
@@ -80,6 +101,7 @@ class ApiSession {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_tokenKey);
     await prefs.remove(_emailKey);
+    await prefs.remove(_accountScopeKey);
   }
 
   static String _normalizeBaseUrl(String value) {

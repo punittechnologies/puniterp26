@@ -80,6 +80,7 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
   String scaleMessage = 'Scale not connected';
   bool usingSimulator = false;
   bool refreshing = false;
+  bool savingAndPrinting = false;
   final Map<String, TextEditingController> fieldControllers = {};
   final Map<String, String> dynamicValues = {};
   final TextEditingController manualTareController = TextEditingController();
@@ -772,7 +773,9 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
     }
   }
 
-  Future<LocalProductionTransaction?> _capture() async {
+  Future<LocalProductionTransaction?> _capture({
+    bool syncAfterSave = true,
+  }) async {
     final product = selectedProduct;
     final computed = computation;
     if (product == null || computed == null) return null;
@@ -783,13 +786,11 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
       );
       return null;
     }
-    final inwardSession = activeInwardSession;
+    var inwardSession = activeInwardSession;
     if (inwardSession?.status != 'open') {
-      _showCornerMessage(
-        'Start transaction first, then save and print labels.',
-        error: true,
-      );
-      return null;
+      inwardSession = await productionRepository.startSession();
+      if (!mounted) return null;
+      setState(() => activeInwardSession = inwardSession);
     }
     final id = await productionRepository.capture(
       product: product,
@@ -800,18 +801,6 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
       inwardSession: inwardSession,
     );
     session.markCaptured(computed.net);
-    final syncResult = await syncQueueService.retryPending(passes: 4);
-    if (syncResult.hasFailures && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Saved locally. Web sync pending: ${syncResult.message}',
-          ),
-          behavior: SnackBarBehavior.floating,
-          backgroundColor: const Color(0xFFB42318),
-        ),
-      );
-    }
     final recent = await productionRepository.recent(limit: 1);
     final saved = recent.firstOrNull;
     setState(() {
@@ -819,10 +808,31 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
       lastSavedBarcode = saved?.barcodeValue ?? lastSavedSerial;
     });
     await _refreshDerived();
+    if (syncAfterSave) unawaited(_syncAfterCapture());
     return saved;
   }
 
-  Future<void> _printLabel() async {
+  Future<void> _syncAfterCapture() async {
+    await syncQueueService.retryPending(passes: 1);
+    if (!mounted) return;
+    final pending = await syncQueueService.pendingCount();
+    if (mounted) setState(() => pendingSync = pending);
+  }
+
+  Future<void> _saveAndPrint() async {
+    if (savingAndPrinting) return;
+    setState(() => savingAndPrinting = true);
+    try {
+      final saved = await _capture(syncAfterSave: false);
+      if (saved == null) return;
+      await _printLabel(saved);
+      unawaited(_syncAfterCapture());
+    } finally {
+      if (mounted) setState(() => savingAndPrinting = false);
+    }
+  }
+
+  Future<void> _printLabel(LocalProductionTransaction saved) async {
     final product = selectedProduct;
     final computed = computation;
     if (product == null || computed == null) return;
@@ -890,34 +900,54 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
             'company_name': _companyNameForTemplate(activeTemplate),
             'product_name': product.name,
             'variant_name': null,
-            'serial_number': lastSavedSerial ?? 'PREVIEW',
-            'barcode_value': lastSavedBarcode ?? lastSavedSerial ?? 'PREVIEW',
-            'gross_weight': computed.gross,
-            'tare_weight': computed.tare,
-            'net_weight': computed.net,
-            'unit': computed.unit,
-            'piece_quantity': computed.roundedPieces,
+            'serial_number': saved.serialNumber,
+            'barcode_value': saved.barcodeValue,
+            'gross_weight': saved.grossWeight,
+            'tare_weight': saved.tareWeight,
+            'net_weight': saved.netWeight,
+            'unit': saved.unit,
+            'piece_quantity': saved.pieceQuantity,
             'dynamic_values': Map<String, dynamic>.from(dynamicValues),
             'product_raw': product.raw,
           },
         ),
       );
       if (!mounted) return;
+      final stillConnected = await _printerStillConnected();
       setState(() {
         printerStatus = result.status == 'printed'
             ? PrinterConnectionStatus.connected
-            : PrinterConnectionStatus.error;
+            : stillConnected
+            ? PrinterConnectionStatus.connected
+            : PrinterConnectionStatus.disconnected;
         printerMessage = result.message ?? result.status;
       });
       if (result.status == 'printed') {
         _showPrintSuccess();
+      } else {
+        _showCornerMessage(
+          result.message ?? 'Printer rejected the label.',
+          error: true,
+        );
       }
     } catch (error) {
       if (!mounted) return;
+      final stillConnected = await _printerStillConnected();
       setState(() {
-        printerStatus = PrinterConnectionStatus.error;
+        printerStatus = stillConnected
+            ? PrinterConnectionStatus.connected
+            : PrinterConnectionStatus.disconnected;
         printerMessage = 'Print failed: $error';
       });
+      _showCornerMessage(printerMessage, error: true);
+    }
+  }
+
+  Future<bool> _printerStillConnected() async {
+    try {
+      return await printerAdapter.isConnected();
+    } catch (_) {
+      return false;
     }
   }
 
@@ -1232,12 +1262,9 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
                       _mobileWeightCard(computed),
                       const SizedBox(height: 10),
                       FilledButton.icon(
-                        onPressed: computed == null
+                        onPressed: computed == null || savingAndPrinting
                             ? null
-                            : () async {
-                                final saved = await _capture();
-                                if (saved != null) await _printLabel();
-                              },
+                            : _saveAndPrint,
                         icon: const Icon(Icons.send_rounded),
                         label: const Text('SAVE & PRINT LABEL'),
                         style: FilledButton.styleFrom(
@@ -1506,12 +1533,9 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
           ),
           const SizedBox(height: 20),
           FilledButton.icon(
-            onPressed: computed == null
+            onPressed: computed == null || savingAndPrinting
                 ? null
-                : () async {
-                    final saved = await _capture();
-                    if (saved != null) await _printLabel();
-                  },
+                : _saveAndPrint,
             icon: const Icon(Icons.print_outlined),
             label: const Text('SAVE & PRINT LABEL'),
             style: FilledButton.styleFrom(

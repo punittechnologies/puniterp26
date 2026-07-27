@@ -72,10 +72,13 @@ class _FoundationScreenState extends State<FoundationScreen> {
   }
 
   Future<_DashboardStats> _loadStats() async {
-    final productions = await database
-        .select(database.localProductionTransactions)
-        .get();
-    final dispatches = await database.select(database.localDispatches).get();
+    final accountScope = await ApiSession.accountScope();
+    final productions = await (database.select(
+      database.localProductionTransactions,
+    )..where((row) => row.accountScope.equals(accountScope))).get();
+    final dispatches = await (database.select(
+      database.localDispatches,
+    )..where((row) => row.accountScope.equals(accountScope))).get();
     final products = await database.select(database.localProducts).get();
     final inventoryRows = await inventory.productWise();
     final pending = await syncQueue.pendingCount();

@@ -4,6 +4,7 @@ import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/api/api_client.dart';
+import '../../../core/api/api_session.dart';
 import '../../../core/database/local_database.dart';
 import '../../products/domain/product_models.dart';
 import '../domain/scale_models.dart';
@@ -23,6 +24,7 @@ class ProductionRepository {
     Map<String, dynamic> dynamicValues = const {},
     LocalInwardSession? inwardSession,
   }) async {
+    final accountScope = await ApiSession.accountScope();
     final now = DateTime.now();
     final id = 'prod_${now.microsecondsSinceEpoch}';
     final short = now.microsecondsSinceEpoch.toRadixString(36).toUpperCase();
@@ -42,6 +44,7 @@ class ProductionRepository {
           .insert(
             LocalProductionTransactionsCompanion.insert(
               id: id,
+              accountScope: Value(accountScope),
               serialNumber: serial,
               barcodeValue: barcode,
               productId: product.id,
@@ -66,6 +69,7 @@ class ProductionRepository {
           .insert(
             LocalInventoryLedgerCompanion.insert(
               id: 'inv_${now.microsecondsSinceEpoch}',
+              accountScope: Value(accountScope),
               productId: product.id,
               variantId: Value(variant?.id),
               serialNumber: Value(serial),
@@ -85,6 +89,7 @@ class ProductionRepository {
           .insert(
             LocalSyncQueueCompanion.insert(
               id: 'sync_$id',
+              accountScope: Value(accountScope),
               entityType: 'production_transaction',
               operation: 'create',
               idempotencyKey: idempotency,
@@ -123,6 +128,7 @@ class ProductionRepository {
   }
 
   Future<LocalInwardSession> startSession() async {
+    final accountScope = await ApiSession.accountScope();
     final now = DateTime.now();
     final id = const Uuid().v7();
     final number =
@@ -132,35 +138,49 @@ class ProductionRepository {
         .insert(
           LocalInwardSessionsCompanion.insert(
             id: id,
+            accountScope: Value(accountScope),
             sessionNumber: number,
             startedAt: now,
           ),
         );
-    return (database.select(
-      database.localInwardSessions,
-    )..where((row) => row.id.equals(id))).getSingle();
+    return (database.select(database.localInwardSessions)..where(
+          (row) => row.id.equals(id) & row.accountScope.equals(accountScope),
+        ))
+        .getSingle();
   }
 
-  Future<LocalInwardSession?> openSession() {
+  Future<LocalInwardSession?> openSession() async {
+    final accountScope = await ApiSession.accountScope();
     return (database.select(database.localInwardSessions)
-          ..where((row) => row.status.equals('open'))
+          ..where(
+            (row) =>
+                row.status.equals('open') &
+                row.accountScope.equals(accountScope),
+          )
           ..orderBy([(row) => OrderingTerm.desc(row.startedAt)])
           ..limit(1))
         .getSingleOrNull();
   }
 
   Future<LocalInwardSession> finishSession(String sessionId) async {
+    final accountScope = await ApiSession.accountScope();
     await _refreshSessionTotals(sessionId, close: true);
-    final session = await (database.select(
-      database.localInwardSessions,
-    )..where((row) => row.id.equals(sessionId))).getSingle();
+    final session =
+        await (database.select(database.localInwardSessions)..where(
+              (row) =>
+                  row.id.equals(sessionId) &
+                  row.accountScope.equals(accountScope),
+            ))
+            .getSingle();
     await _queueInwardSessionSync(session);
 
     return session;
   }
 
-  Future<List<LocalInwardSession>> sessions({int limit = 50}) {
+  Future<List<LocalInwardSession>> sessions({int limit = 50}) async {
+    final accountScope = await ApiSession.accountScope();
     return (database.select(database.localInwardSessions)
+          ..where((row) => row.accountScope.equals(accountScope))
           ..orderBy([(row) => OrderingTerm.desc(row.startedAt)])
           ..limit(limit))
         .get();
@@ -170,28 +190,40 @@ class ProductionRepository {
     String sessionId, {
     bool close = false,
   }) async {
-    final rows = await (database.select(
-      database.localProductionTransactions,
-    )..where((row) => row.inwardSessionId.equals(sessionId))).get();
-    await (database.update(
-      database.localInwardSessions,
-    )..where((row) => row.id.equals(sessionId))).write(
-      LocalInwardSessionsCompanion(
-        status: Value(close ? 'saved' : 'open'),
-        entryCount: Value(rows.length),
-        totalGrossWeight: Value(
-          rows.fold(0, (sum, row) => sum + row.grossWeight),
-        ),
-        totalTareWeight: Value(
-          rows.fold(0, (sum, row) => sum + row.tareWeight),
-        ),
-        totalNetWeight: Value(rows.fold(0, (sum, row) => sum + row.netWeight)),
-        totalPieceQuantity: Value(
-          rows.fold<double>(0, (sum, row) => sum + (row.pieceQuantity ?? 0)),
-        ),
-        endedAt: close ? Value(DateTime.now()) : const Value.absent(),
-      ),
-    );
+    final accountScope = await ApiSession.accountScope();
+    final rows =
+        await (database.select(database.localProductionTransactions)..where(
+              (row) =>
+                  row.inwardSessionId.equals(sessionId) &
+                  row.accountScope.equals(accountScope),
+            ))
+            .get();
+    await (database.update(database.localInwardSessions)..where(
+          (row) =>
+              row.id.equals(sessionId) & row.accountScope.equals(accountScope),
+        ))
+        .write(
+          LocalInwardSessionsCompanion(
+            status: Value(close ? 'saved' : 'open'),
+            entryCount: Value(rows.length),
+            totalGrossWeight: Value(
+              rows.fold(0, (sum, row) => sum + row.grossWeight),
+            ),
+            totalTareWeight: Value(
+              rows.fold(0, (sum, row) => sum + row.tareWeight),
+            ),
+            totalNetWeight: Value(
+              rows.fold(0, (sum, row) => sum + row.netWeight),
+            ),
+            totalPieceQuantity: Value(
+              rows.fold<double>(
+                0,
+                (sum, row) => sum + (row.pieceQuantity ?? 0),
+              ),
+            ),
+            endedAt: close ? Value(DateTime.now()) : const Value.absent(),
+          ),
+        );
   }
 
   Future<void> _queueInwardSessionSync(LocalInwardSession session) async {
@@ -202,6 +234,7 @@ class ProductionRepository {
         .insertOnConflictUpdate(
           LocalSyncQueueCompanion.insert(
             id: 'sync_${session.id}',
+            accountScope: Value(session.accountScope),
             entityType: 'inward_session',
             operation: 'update',
             idempotencyKey: idempotency,
@@ -223,21 +256,30 @@ class ProductionRepository {
         );
   }
 
-  Future<List<LocalProductionTransaction>> recent({int limit = 50}) {
+  Future<List<LocalProductionTransaction>> recent({int limit = 50}) async {
+    final accountScope = await ApiSession.accountScope();
     return (database.select(database.localProductionTransactions)
+          ..where((row) => row.accountScope.equals(accountScope))
           ..orderBy([(row) => OrderingTerm.desc(row.capturedAt)])
           ..limit(limit))
         .get();
   }
 
-  Future<List<LocalProductionTransaction>> bySession(String sessionId) {
+  Future<List<LocalProductionTransaction>> bySession(String sessionId) async {
+    final accountScope = await ApiSession.accountScope();
     return (database.select(database.localProductionTransactions)
-          ..where((row) => row.inwardSessionId.equals(sessionId))
+          ..where(
+            (row) =>
+                row.inwardSessionId.equals(sessionId) &
+                row.accountScope.equals(accountScope),
+          )
           ..orderBy([(row) => OrderingTerm.asc(row.capturedAt)]))
         .get();
   }
 
   Future<bool> deleteEntry(LocalProductionTransaction row) async {
+    final accountScope = await ApiSession.accountScope();
+    if (row.accountScope != accountScope) return false;
     if (row.syncStatus == 'synced') {
       final client = apiClient;
       if (client == null) {
@@ -247,15 +289,24 @@ class ProductionRepository {
     }
 
     await database.transaction(() async {
-      await (database.delete(
-        database.localSyncQueue,
-      )..where((entry) => entry.id.equals('sync_${row.id}'))).go();
-      await (database.delete(
-        database.localInventoryLedger,
-      )..where((entry) => entry.referenceId.equals(row.id))).go();
-      await (database.delete(
-        database.localProductionTransactions,
-      )..where((entry) => entry.id.equals(row.id))).go();
+      await (database.delete(database.localSyncQueue)..where(
+            (entry) =>
+                entry.id.equals('sync_${row.id}') &
+                entry.accountScope.equals(accountScope),
+          ))
+          .go();
+      await (database.delete(database.localInventoryLedger)..where(
+            (entry) =>
+                entry.referenceId.equals(row.id) &
+                entry.accountScope.equals(accountScope),
+          ))
+          .go();
+      await (database.delete(database.localProductionTransactions)..where(
+            (entry) =>
+                entry.id.equals(row.id) &
+                entry.accountScope.equals(accountScope),
+          ))
+          .go();
       final sessionId = row.inwardSessionId;
       if (sessionId != null) {
         await _refreshSessionTotals(sessionId);

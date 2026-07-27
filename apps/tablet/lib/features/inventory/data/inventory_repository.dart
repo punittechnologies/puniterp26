@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 
 import '../../../core/api/api_client.dart';
+import '../../../core/api/api_session.dart';
 import '../../../core/database/local_database.dart';
 
 class InventorySummary {
@@ -44,8 +45,10 @@ class InventoryRepository {
   final LocalDatabase database;
   final ApiClient? apiClient;
 
-  Future<List<LocalInventoryLedgerData>> ledger({int limit = 200}) {
+  Future<List<LocalInventoryLedgerData>> ledger({int limit = 200}) async {
+    final accountScope = await ApiSession.accountScope();
     return (database.select(database.localInventoryLedger)
+          ..where((row) => row.accountScope.equals(accountScope))
           ..orderBy([(row) => OrderingTerm.desc(row.occurredAt)])
           ..limit(limit))
         .get();
@@ -117,7 +120,10 @@ class InventoryRepository {
   }
 
   Future<List<InventorySummary>> _localProductWise() async {
-    final rows = await database.select(database.localInventoryLedger).get();
+    final accountScope = await ApiSession.accountScope();
+    final rows = await (database.select(
+      database.localInventoryLedger,
+    )..where((row) => row.accountScope.equals(accountScope))).get();
     final productNames = await _productNames();
     final variantNames = await _variantNames();
     final grouped = <String, InventorySummary>{};

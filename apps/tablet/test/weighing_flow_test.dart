@@ -8,6 +8,7 @@ import 'package:punit_tablet/features/weighing/data/production_repository.dart';
 import 'package:punit_tablet/features/weighing/domain/scale_models.dart';
 import 'package:punit_tablet/features/weighing/domain/scale_parser.dart';
 import 'package:punit_tablet/features/weighing/domain/weighing_logic.dart';
+import 'package:punit_tablet/services/sync/sync_queue_service.dart';
 
 void main() {
   test('buffers partial packets and parses stable scale readings', () {
@@ -136,6 +137,46 @@ void main() {
     expect(finished.status, 'saved');
     expect(finished.entryCount, 1);
     expect(queued.payloadJson, contains('"session_number"'));
+  });
+
+  test('account-scoped repositories hide legacy operational data', () async {
+    final database = LocalDatabase.memory();
+    final now = DateTime.now();
+    await database
+        .into(database.localProductionTransactions)
+        .insert(
+          LocalProductionTransactionsCompanion.insert(
+            id: 'old-production',
+            accountScope: const Value('legacy'),
+            serialNumber: 'OLD-1',
+            barcodeValue: 'OLD-1',
+            productId: 'old-product',
+            productSnapshotJson: '{}',
+            grossWeight: 1,
+            tareWeight: 0,
+            netWeight: 1,
+            idempotencyKey: 'old-production-idem',
+            rawReadingJson: '{}',
+            capturedAt: now,
+          ),
+        );
+    await database
+        .into(database.localSyncQueue)
+        .insert(
+          LocalSyncQueueCompanion.insert(
+            id: 'old-sync',
+            accountScope: const Value('legacy'),
+            entityType: 'production_transaction',
+            operation: 'create',
+            idempotencyKey: 'old-sync-idem',
+            payloadJson: '{}',
+            createdAt: now,
+            updatedAt: now,
+          ),
+        );
+
+    expect(await ProductionRepository(database: database).recent(), isEmpty);
+    expect(await SyncQueueService(database).pendingCount(), 0);
   });
 
   test('dispatch rejects already dispatched barcode', () async {

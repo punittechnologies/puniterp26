@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:drift/drift.dart';
 
 import '../../core/api/api_client.dart';
+import '../../core/api/api_session.dart';
 import '../../core/database/local_database.dart';
 
 class SyncQueueService {
@@ -13,19 +14,26 @@ class SyncQueueService {
   final ApiClient? apiClient;
 
   Future<int> pendingCount() async {
+    final accountScope = await ApiSession.accountScope();
     final entries =
         await (database.select(database.localSyncQueue)..where(
               (entry) =>
-                  entry.status.equals('pending') |
-                  entry.status.equals('failed'),
+                  entry.accountScope.equals(accountScope) &
+                  (entry.status.equals('pending') |
+                      entry.status.equals('failed')),
             ))
             .get();
     return entries.length;
   }
 
-  Future<List<LocalSyncQueueData>> failed() {
+  Future<List<LocalSyncQueueData>> failed() async {
+    final accountScope = await ApiSession.accountScope();
     return (database.select(database.localSyncQueue)
-          ..where((entry) => entry.status.equals('failed'))
+          ..where(
+            (entry) =>
+                entry.accountScope.equals(accountScope) &
+                entry.status.equals('failed'),
+          )
           ..orderBy([(entry) => OrderingTerm.desc(entry.updatedAt)]))
         .get();
   }
@@ -83,11 +91,13 @@ class SyncQueueService {
   }
 
   Future<List<LocalSyncQueueData>> _pendingInSyncOrder() async {
+    final accountScope = await ApiSession.accountScope();
     final entries =
         await (database.select(database.localSyncQueue)..where(
               (entry) =>
-                  entry.status.equals('pending') |
-                  entry.status.equals('failed'),
+                  entry.accountScope.equals(accountScope) &
+                  (entry.status.equals('pending') |
+                      entry.status.equals('failed')),
             ))
             .get();
     entries.sort((a, b) {

@@ -9,6 +9,7 @@ part 'local_database.g.dart';
 
 class LocalSyncQueue extends Table {
   TextColumn get id => text()();
+  TextColumn get accountScope => text().withDefault(const Constant('legacy'))();
   TextColumn get entityType => text()();
   TextColumn get operation => text()();
   TextColumn get idempotencyKey => text().unique()();
@@ -100,6 +101,7 @@ class LocalScaleProfiles extends Table {
 
 class LocalInwardSessions extends Table {
   TextColumn get id => text()();
+  TextColumn get accountScope => text().withDefault(const Constant('legacy'))();
   TextColumn get sessionNumber => text().unique()();
   TextColumn get status => text().withDefault(const Constant('open'))();
   IntColumn get entryCount => integer().withDefault(const Constant(0))();
@@ -116,6 +118,7 @@ class LocalInwardSessions extends Table {
 
 class LocalProductionTransactions extends Table {
   TextColumn get id => text()();
+  TextColumn get accountScope => text().withDefault(const Constant('legacy'))();
   TextColumn get serialNumber => text().unique()();
   TextColumn get barcodeValue => text().unique()();
   TextColumn get productId => text()();
@@ -141,6 +144,7 @@ class LocalProductionTransactions extends Table {
 
 class LocalInventoryLedger extends Table {
   TextColumn get id => text()();
+  TextColumn get accountScope => text().withDefault(const Constant('legacy'))();
   TextColumn get productId => text()();
   TextColumn get variantId => text().nullable()();
   TextColumn get serialNumber => text().nullable()();
@@ -170,6 +174,7 @@ class LocalCustomers extends Table {
 
 class LocalDispatches extends Table {
   TextColumn get id => text()();
+  TextColumn get accountScope => text().withDefault(const Constant('legacy'))();
   TextColumn get dispatchNumber => text().unique()();
   TextColumn get customerId => text()();
   TextColumn get customerSnapshotJson => text()();
@@ -187,6 +192,7 @@ class LocalDispatches extends Table {
 
 class LocalDispatchItems extends Table {
   TextColumn get id => text()();
+  TextColumn get accountScope => text().withDefault(const Constant('legacy'))();
   TextColumn get dispatchId => text()();
   TextColumn get productionTransactionId => text()();
   TextColumn get barcodeValue => text()();
@@ -230,7 +236,7 @@ class LocalDatabase extends _$LocalDatabase {
   final bool _closeOnDispose;
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -241,6 +247,23 @@ class LocalDatabase extends _$LocalDatabase {
           localProductionTransactions,
           localProductionTransactions.inwardSessionId,
         );
+      }
+      if (from < 6) {
+        await m.addColumn(localSyncQueue, localSyncQueue.accountScope);
+        await m.addColumn(
+          localInwardSessions,
+          localInwardSessions.accountScope,
+        );
+        await m.addColumn(
+          localProductionTransactions,
+          localProductionTransactions.accountScope,
+        );
+        await m.addColumn(
+          localInventoryLedger,
+          localInventoryLedger.accountScope,
+        );
+        await m.addColumn(localDispatches, localDispatches.accountScope);
+        await m.addColumn(localDispatchItems, localDispatchItems.accountScope);
       }
     },
   );

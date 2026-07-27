@@ -18,6 +18,18 @@ class $LocalSyncQueueTable extends LocalSyncQueue
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _accountScopeMeta = const VerificationMeta(
+    'accountScope',
+  );
+  @override
+  late final GeneratedColumn<String> accountScope = GeneratedColumn<String>(
+    'account_scope',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('legacy'),
+  );
   static const VerificationMeta _entityTypeMeta = const VerificationMeta(
     'entityType',
   );
@@ -110,6 +122,7 @@ class $LocalSyncQueueTable extends LocalSyncQueue
   @override
   List<GeneratedColumn> get $columns => [
     id,
+    accountScope,
     entityType,
     operation,
     idempotencyKey,
@@ -135,6 +148,15 @@ class $LocalSyncQueueTable extends LocalSyncQueue
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
     } else if (isInserting) {
       context.missing(_idMeta);
+    }
+    if (data.containsKey('account_scope')) {
+      context.handle(
+        _accountScopeMeta,
+        accountScope.isAcceptableOrUnknown(
+          data['account_scope']!,
+          _accountScopeMeta,
+        ),
+      );
     }
     if (data.containsKey('entity_type')) {
       context.handle(
@@ -218,6 +240,10 @@ class $LocalSyncQueueTable extends LocalSyncQueue
         DriftSqlType.string,
         data['${effectivePrefix}id'],
       )!,
+      accountScope: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}account_scope'],
+      )!,
       entityType: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}entity_type'],
@@ -262,6 +288,7 @@ class $LocalSyncQueueTable extends LocalSyncQueue
 class LocalSyncQueueData extends DataClass
     implements Insertable<LocalSyncQueueData> {
   final String id;
+  final String accountScope;
   final String entityType;
   final String operation;
   final String idempotencyKey;
@@ -272,6 +299,7 @@ class LocalSyncQueueData extends DataClass
   final DateTime updatedAt;
   const LocalSyncQueueData({
     required this.id,
+    required this.accountScope,
     required this.entityType,
     required this.operation,
     required this.idempotencyKey,
@@ -285,6 +313,7 @@ class LocalSyncQueueData extends DataClass
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['id'] = Variable<String>(id);
+    map['account_scope'] = Variable<String>(accountScope);
     map['entity_type'] = Variable<String>(entityType);
     map['operation'] = Variable<String>(operation);
     map['idempotency_key'] = Variable<String>(idempotencyKey);
@@ -299,6 +328,7 @@ class LocalSyncQueueData extends DataClass
   LocalSyncQueueCompanion toCompanion(bool nullToAbsent) {
     return LocalSyncQueueCompanion(
       id: Value(id),
+      accountScope: Value(accountScope),
       entityType: Value(entityType),
       operation: Value(operation),
       idempotencyKey: Value(idempotencyKey),
@@ -317,6 +347,7 @@ class LocalSyncQueueData extends DataClass
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return LocalSyncQueueData(
       id: serializer.fromJson<String>(json['id']),
+      accountScope: serializer.fromJson<String>(json['accountScope']),
       entityType: serializer.fromJson<String>(json['entityType']),
       operation: serializer.fromJson<String>(json['operation']),
       idempotencyKey: serializer.fromJson<String>(json['idempotencyKey']),
@@ -332,6 +363,7 @@ class LocalSyncQueueData extends DataClass
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
       'id': serializer.toJson<String>(id),
+      'accountScope': serializer.toJson<String>(accountScope),
       'entityType': serializer.toJson<String>(entityType),
       'operation': serializer.toJson<String>(operation),
       'idempotencyKey': serializer.toJson<String>(idempotencyKey),
@@ -345,6 +377,7 @@ class LocalSyncQueueData extends DataClass
 
   LocalSyncQueueData copyWith({
     String? id,
+    String? accountScope,
     String? entityType,
     String? operation,
     String? idempotencyKey,
@@ -355,6 +388,7 @@ class LocalSyncQueueData extends DataClass
     DateTime? updatedAt,
   }) => LocalSyncQueueData(
     id: id ?? this.id,
+    accountScope: accountScope ?? this.accountScope,
     entityType: entityType ?? this.entityType,
     operation: operation ?? this.operation,
     idempotencyKey: idempotencyKey ?? this.idempotencyKey,
@@ -367,6 +401,9 @@ class LocalSyncQueueData extends DataClass
   LocalSyncQueueData copyWithCompanion(LocalSyncQueueCompanion data) {
     return LocalSyncQueueData(
       id: data.id.present ? data.id.value : this.id,
+      accountScope: data.accountScope.present
+          ? data.accountScope.value
+          : this.accountScope,
       entityType: data.entityType.present
           ? data.entityType.value
           : this.entityType,
@@ -390,6 +427,7 @@ class LocalSyncQueueData extends DataClass
   String toString() {
     return (StringBuffer('LocalSyncQueueData(')
           ..write('id: $id, ')
+          ..write('accountScope: $accountScope, ')
           ..write('entityType: $entityType, ')
           ..write('operation: $operation, ')
           ..write('idempotencyKey: $idempotencyKey, ')
@@ -405,6 +443,7 @@ class LocalSyncQueueData extends DataClass
   @override
   int get hashCode => Object.hash(
     id,
+    accountScope,
     entityType,
     operation,
     idempotencyKey,
@@ -419,6 +458,7 @@ class LocalSyncQueueData extends DataClass
       identical(this, other) ||
       (other is LocalSyncQueueData &&
           other.id == this.id &&
+          other.accountScope == this.accountScope &&
           other.entityType == this.entityType &&
           other.operation == this.operation &&
           other.idempotencyKey == this.idempotencyKey &&
@@ -431,6 +471,7 @@ class LocalSyncQueueData extends DataClass
 
 class LocalSyncQueueCompanion extends UpdateCompanion<LocalSyncQueueData> {
   final Value<String> id;
+  final Value<String> accountScope;
   final Value<String> entityType;
   final Value<String> operation;
   final Value<String> idempotencyKey;
@@ -442,6 +483,7 @@ class LocalSyncQueueCompanion extends UpdateCompanion<LocalSyncQueueData> {
   final Value<int> rowid;
   const LocalSyncQueueCompanion({
     this.id = const Value.absent(),
+    this.accountScope = const Value.absent(),
     this.entityType = const Value.absent(),
     this.operation = const Value.absent(),
     this.idempotencyKey = const Value.absent(),
@@ -454,6 +496,7 @@ class LocalSyncQueueCompanion extends UpdateCompanion<LocalSyncQueueData> {
   });
   LocalSyncQueueCompanion.insert({
     required String id,
+    this.accountScope = const Value.absent(),
     required String entityType,
     required String operation,
     required String idempotencyKey,
@@ -472,6 +515,7 @@ class LocalSyncQueueCompanion extends UpdateCompanion<LocalSyncQueueData> {
        updatedAt = Value(updatedAt);
   static Insertable<LocalSyncQueueData> custom({
     Expression<String>? id,
+    Expression<String>? accountScope,
     Expression<String>? entityType,
     Expression<String>? operation,
     Expression<String>? idempotencyKey,
@@ -484,6 +528,7 @@ class LocalSyncQueueCompanion extends UpdateCompanion<LocalSyncQueueData> {
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
+      if (accountScope != null) 'account_scope': accountScope,
       if (entityType != null) 'entity_type': entityType,
       if (operation != null) 'operation': operation,
       if (idempotencyKey != null) 'idempotency_key': idempotencyKey,
@@ -498,6 +543,7 @@ class LocalSyncQueueCompanion extends UpdateCompanion<LocalSyncQueueData> {
 
   LocalSyncQueueCompanion copyWith({
     Value<String>? id,
+    Value<String>? accountScope,
     Value<String>? entityType,
     Value<String>? operation,
     Value<String>? idempotencyKey,
@@ -510,6 +556,7 @@ class LocalSyncQueueCompanion extends UpdateCompanion<LocalSyncQueueData> {
   }) {
     return LocalSyncQueueCompanion(
       id: id ?? this.id,
+      accountScope: accountScope ?? this.accountScope,
       entityType: entityType ?? this.entityType,
       operation: operation ?? this.operation,
       idempotencyKey: idempotencyKey ?? this.idempotencyKey,
@@ -527,6 +574,9 @@ class LocalSyncQueueCompanion extends UpdateCompanion<LocalSyncQueueData> {
     final map = <String, Expression>{};
     if (id.present) {
       map['id'] = Variable<String>(id.value);
+    }
+    if (accountScope.present) {
+      map['account_scope'] = Variable<String>(accountScope.value);
     }
     if (entityType.present) {
       map['entity_type'] = Variable<String>(entityType.value);
@@ -562,6 +612,7 @@ class LocalSyncQueueCompanion extends UpdateCompanion<LocalSyncQueueData> {
   String toString() {
     return (StringBuffer('LocalSyncQueueCompanion(')
           ..write('id: $id, ')
+          ..write('accountScope: $accountScope, ')
           ..write('entityType: $entityType, ')
           ..write('operation: $operation, ')
           ..write('idempotencyKey: $idempotencyKey, ')
@@ -3221,6 +3272,18 @@ class $LocalInwardSessionsTable extends LocalInwardSessions
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _accountScopeMeta = const VerificationMeta(
+    'accountScope',
+  );
+  @override
+  late final GeneratedColumn<String> accountScope = GeneratedColumn<String>(
+    'account_scope',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('legacy'),
+  );
   static const VerificationMeta _sessionNumberMeta = const VerificationMeta(
     'sessionNumber',
   );
@@ -3327,6 +3390,7 @@ class $LocalInwardSessionsTable extends LocalInwardSessions
   @override
   List<GeneratedColumn> get $columns => [
     id,
+    accountScope,
     sessionNumber,
     status,
     entryCount,
@@ -3353,6 +3417,15 @@ class $LocalInwardSessionsTable extends LocalInwardSessions
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
     } else if (isInserting) {
       context.missing(_idMeta);
+    }
+    if (data.containsKey('account_scope')) {
+      context.handle(
+        _accountScopeMeta,
+        accountScope.isAcceptableOrUnknown(
+          data['account_scope']!,
+          _accountScopeMeta,
+        ),
+      );
     }
     if (data.containsKey('session_number')) {
       context.handle(
@@ -3440,6 +3513,10 @@ class $LocalInwardSessionsTable extends LocalInwardSessions
         DriftSqlType.string,
         data['${effectivePrefix}id'],
       )!,
+      accountScope: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}account_scope'],
+      )!,
       sessionNumber: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}session_number'],
@@ -3488,6 +3565,7 @@ class $LocalInwardSessionsTable extends LocalInwardSessions
 class LocalInwardSession extends DataClass
     implements Insertable<LocalInwardSession> {
   final String id;
+  final String accountScope;
   final String sessionNumber;
   final String status;
   final int entryCount;
@@ -3499,6 +3577,7 @@ class LocalInwardSession extends DataClass
   final DateTime? endedAt;
   const LocalInwardSession({
     required this.id,
+    required this.accountScope,
     required this.sessionNumber,
     required this.status,
     required this.entryCount,
@@ -3513,6 +3592,7 @@ class LocalInwardSession extends DataClass
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['id'] = Variable<String>(id);
+    map['account_scope'] = Variable<String>(accountScope);
     map['session_number'] = Variable<String>(sessionNumber);
     map['status'] = Variable<String>(status);
     map['entry_count'] = Variable<int>(entryCount);
@@ -3532,6 +3612,7 @@ class LocalInwardSession extends DataClass
   LocalInwardSessionsCompanion toCompanion(bool nullToAbsent) {
     return LocalInwardSessionsCompanion(
       id: Value(id),
+      accountScope: Value(accountScope),
       sessionNumber: Value(sessionNumber),
       status: Value(status),
       entryCount: Value(entryCount),
@@ -3555,6 +3636,7 @@ class LocalInwardSession extends DataClass
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return LocalInwardSession(
       id: serializer.fromJson<String>(json['id']),
+      accountScope: serializer.fromJson<String>(json['accountScope']),
       sessionNumber: serializer.fromJson<String>(json['sessionNumber']),
       status: serializer.fromJson<String>(json['status']),
       entryCount: serializer.fromJson<int>(json['entryCount']),
@@ -3573,6 +3655,7 @@ class LocalInwardSession extends DataClass
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
       'id': serializer.toJson<String>(id),
+      'accountScope': serializer.toJson<String>(accountScope),
       'sessionNumber': serializer.toJson<String>(sessionNumber),
       'status': serializer.toJson<String>(status),
       'entryCount': serializer.toJson<int>(entryCount),
@@ -3587,6 +3670,7 @@ class LocalInwardSession extends DataClass
 
   LocalInwardSession copyWith({
     String? id,
+    String? accountScope,
     String? sessionNumber,
     String? status,
     int? entryCount,
@@ -3598,6 +3682,7 @@ class LocalInwardSession extends DataClass
     Value<DateTime?> endedAt = const Value.absent(),
   }) => LocalInwardSession(
     id: id ?? this.id,
+    accountScope: accountScope ?? this.accountScope,
     sessionNumber: sessionNumber ?? this.sessionNumber,
     status: status ?? this.status,
     entryCount: entryCount ?? this.entryCount,
@@ -3613,6 +3698,9 @@ class LocalInwardSession extends DataClass
   LocalInwardSession copyWithCompanion(LocalInwardSessionsCompanion data) {
     return LocalInwardSession(
       id: data.id.present ? data.id.value : this.id,
+      accountScope: data.accountScope.present
+          ? data.accountScope.value
+          : this.accountScope,
       sessionNumber: data.sessionNumber.present
           ? data.sessionNumber.value
           : this.sessionNumber,
@@ -3641,6 +3729,7 @@ class LocalInwardSession extends DataClass
   String toString() {
     return (StringBuffer('LocalInwardSession(')
           ..write('id: $id, ')
+          ..write('accountScope: $accountScope, ')
           ..write('sessionNumber: $sessionNumber, ')
           ..write('status: $status, ')
           ..write('entryCount: $entryCount, ')
@@ -3657,6 +3746,7 @@ class LocalInwardSession extends DataClass
   @override
   int get hashCode => Object.hash(
     id,
+    accountScope,
     sessionNumber,
     status,
     entryCount,
@@ -3672,6 +3762,7 @@ class LocalInwardSession extends DataClass
       identical(this, other) ||
       (other is LocalInwardSession &&
           other.id == this.id &&
+          other.accountScope == this.accountScope &&
           other.sessionNumber == this.sessionNumber &&
           other.status == this.status &&
           other.entryCount == this.entryCount &&
@@ -3685,6 +3776,7 @@ class LocalInwardSession extends DataClass
 
 class LocalInwardSessionsCompanion extends UpdateCompanion<LocalInwardSession> {
   final Value<String> id;
+  final Value<String> accountScope;
   final Value<String> sessionNumber;
   final Value<String> status;
   final Value<int> entryCount;
@@ -3697,6 +3789,7 @@ class LocalInwardSessionsCompanion extends UpdateCompanion<LocalInwardSession> {
   final Value<int> rowid;
   const LocalInwardSessionsCompanion({
     this.id = const Value.absent(),
+    this.accountScope = const Value.absent(),
     this.sessionNumber = const Value.absent(),
     this.status = const Value.absent(),
     this.entryCount = const Value.absent(),
@@ -3710,6 +3803,7 @@ class LocalInwardSessionsCompanion extends UpdateCompanion<LocalInwardSession> {
   });
   LocalInwardSessionsCompanion.insert({
     required String id,
+    this.accountScope = const Value.absent(),
     required String sessionNumber,
     this.status = const Value.absent(),
     this.entryCount = const Value.absent(),
@@ -3725,6 +3819,7 @@ class LocalInwardSessionsCompanion extends UpdateCompanion<LocalInwardSession> {
        startedAt = Value(startedAt);
   static Insertable<LocalInwardSession> custom({
     Expression<String>? id,
+    Expression<String>? accountScope,
     Expression<String>? sessionNumber,
     Expression<String>? status,
     Expression<int>? entryCount,
@@ -3738,6 +3833,7 @@ class LocalInwardSessionsCompanion extends UpdateCompanion<LocalInwardSession> {
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
+      if (accountScope != null) 'account_scope': accountScope,
       if (sessionNumber != null) 'session_number': sessionNumber,
       if (status != null) 'status': status,
       if (entryCount != null) 'entry_count': entryCount,
@@ -3754,6 +3850,7 @@ class LocalInwardSessionsCompanion extends UpdateCompanion<LocalInwardSession> {
 
   LocalInwardSessionsCompanion copyWith({
     Value<String>? id,
+    Value<String>? accountScope,
     Value<String>? sessionNumber,
     Value<String>? status,
     Value<int>? entryCount,
@@ -3767,6 +3864,7 @@ class LocalInwardSessionsCompanion extends UpdateCompanion<LocalInwardSession> {
   }) {
     return LocalInwardSessionsCompanion(
       id: id ?? this.id,
+      accountScope: accountScope ?? this.accountScope,
       sessionNumber: sessionNumber ?? this.sessionNumber,
       status: status ?? this.status,
       entryCount: entryCount ?? this.entryCount,
@@ -3785,6 +3883,9 @@ class LocalInwardSessionsCompanion extends UpdateCompanion<LocalInwardSession> {
     final map = <String, Expression>{};
     if (id.present) {
       map['id'] = Variable<String>(id.value);
+    }
+    if (accountScope.present) {
+      map['account_scope'] = Variable<String>(accountScope.value);
     }
     if (sessionNumber.present) {
       map['session_number'] = Variable<String>(sessionNumber.value);
@@ -3823,6 +3924,7 @@ class LocalInwardSessionsCompanion extends UpdateCompanion<LocalInwardSession> {
   String toString() {
     return (StringBuffer('LocalInwardSessionsCompanion(')
           ..write('id: $id, ')
+          ..write('accountScope: $accountScope, ')
           ..write('sessionNumber: $sessionNumber, ')
           ..write('status: $status, ')
           ..write('entryCount: $entryCount, ')
@@ -3856,6 +3958,18 @@ class $LocalProductionTransactionsTable extends LocalProductionTransactions
     false,
     type: DriftSqlType.string,
     requiredDuringInsert: true,
+  );
+  static const VerificationMeta _accountScopeMeta = const VerificationMeta(
+    'accountScope',
+  );
+  @override
+  late final GeneratedColumn<String> accountScope = GeneratedColumn<String>(
+    'account_scope',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('legacy'),
   );
   static const VerificationMeta _serialNumberMeta = const VerificationMeta(
     'serialNumber',
@@ -4051,6 +4165,7 @@ class $LocalProductionTransactionsTable extends LocalProductionTransactions
   @override
   List<GeneratedColumn> get $columns => [
     id,
+    accountScope,
     serialNumber,
     barcodeValue,
     productId,
@@ -4085,6 +4200,15 @@ class $LocalProductionTransactionsTable extends LocalProductionTransactions
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
     } else if (isInserting) {
       context.missing(_idMeta);
+    }
+    if (data.containsKey('account_scope')) {
+      context.handle(
+        _accountScopeMeta,
+        accountScope.isAcceptableOrUnknown(
+          data['account_scope']!,
+          _accountScopeMeta,
+        ),
+      );
     }
     if (data.containsKey('serial_number')) {
       context.handle(
@@ -4251,6 +4375,10 @@ class $LocalProductionTransactionsTable extends LocalProductionTransactions
         DriftSqlType.string,
         data['${effectivePrefix}id'],
       )!,
+      accountScope: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}account_scope'],
+      )!,
       serialNumber: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}serial_number'],
@@ -4331,6 +4459,7 @@ class $LocalProductionTransactionsTable extends LocalProductionTransactions
 class LocalProductionTransaction extends DataClass
     implements Insertable<LocalProductionTransaction> {
   final String id;
+  final String accountScope;
   final String serialNumber;
   final String barcodeValue;
   final String productId;
@@ -4350,6 +4479,7 @@ class LocalProductionTransaction extends DataClass
   final DateTime capturedAt;
   const LocalProductionTransaction({
     required this.id,
+    required this.accountScope,
     required this.serialNumber,
     required this.barcodeValue,
     required this.productId,
@@ -4372,6 +4502,7 @@ class LocalProductionTransaction extends DataClass
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['id'] = Variable<String>(id);
+    map['account_scope'] = Variable<String>(accountScope);
     map['serial_number'] = Variable<String>(serialNumber);
     map['barcode_value'] = Variable<String>(barcodeValue);
     map['product_id'] = Variable<String>(productId);
@@ -4401,6 +4532,7 @@ class LocalProductionTransaction extends DataClass
   LocalProductionTransactionsCompanion toCompanion(bool nullToAbsent) {
     return LocalProductionTransactionsCompanion(
       id: Value(id),
+      accountScope: Value(accountScope),
       serialNumber: Value(serialNumber),
       barcodeValue: Value(barcodeValue),
       productId: Value(productId),
@@ -4434,6 +4566,7 @@ class LocalProductionTransaction extends DataClass
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return LocalProductionTransaction(
       id: serializer.fromJson<String>(json['id']),
+      accountScope: serializer.fromJson<String>(json['accountScope']),
       serialNumber: serializer.fromJson<String>(json['serialNumber']),
       barcodeValue: serializer.fromJson<String>(json['barcodeValue']),
       productId: serializer.fromJson<String>(json['productId']),
@@ -4460,6 +4593,7 @@ class LocalProductionTransaction extends DataClass
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
       'id': serializer.toJson<String>(id),
+      'accountScope': serializer.toJson<String>(accountScope),
       'serialNumber': serializer.toJson<String>(serialNumber),
       'barcodeValue': serializer.toJson<String>(barcodeValue),
       'productId': serializer.toJson<String>(productId),
@@ -4482,6 +4616,7 @@ class LocalProductionTransaction extends DataClass
 
   LocalProductionTransaction copyWith({
     String? id,
+    String? accountScope,
     String? serialNumber,
     String? barcodeValue,
     String? productId,
@@ -4501,6 +4636,7 @@ class LocalProductionTransaction extends DataClass
     DateTime? capturedAt,
   }) => LocalProductionTransaction(
     id: id ?? this.id,
+    accountScope: accountScope ?? this.accountScope,
     serialNumber: serialNumber ?? this.serialNumber,
     barcodeValue: barcodeValue ?? this.barcodeValue,
     productId: productId ?? this.productId,
@@ -4528,6 +4664,9 @@ class LocalProductionTransaction extends DataClass
   ) {
     return LocalProductionTransaction(
       id: data.id.present ? data.id.value : this.id,
+      accountScope: data.accountScope.present
+          ? data.accountScope.value
+          : this.accountScope,
       serialNumber: data.serialNumber.present
           ? data.serialNumber.value
           : this.serialNumber,
@@ -4576,6 +4715,7 @@ class LocalProductionTransaction extends DataClass
   String toString() {
     return (StringBuffer('LocalProductionTransaction(')
           ..write('id: $id, ')
+          ..write('accountScope: $accountScope, ')
           ..write('serialNumber: $serialNumber, ')
           ..write('barcodeValue: $barcodeValue, ')
           ..write('productId: $productId, ')
@@ -4600,6 +4740,7 @@ class LocalProductionTransaction extends DataClass
   @override
   int get hashCode => Object.hash(
     id,
+    accountScope,
     serialNumber,
     barcodeValue,
     productId,
@@ -4623,6 +4764,7 @@ class LocalProductionTransaction extends DataClass
       identical(this, other) ||
       (other is LocalProductionTransaction &&
           other.id == this.id &&
+          other.accountScope == this.accountScope &&
           other.serialNumber == this.serialNumber &&
           other.barcodeValue == this.barcodeValue &&
           other.productId == this.productId &&
@@ -4645,6 +4787,7 @@ class LocalProductionTransaction extends DataClass
 class LocalProductionTransactionsCompanion
     extends UpdateCompanion<LocalProductionTransaction> {
   final Value<String> id;
+  final Value<String> accountScope;
   final Value<String> serialNumber;
   final Value<String> barcodeValue;
   final Value<String> productId;
@@ -4665,6 +4808,7 @@ class LocalProductionTransactionsCompanion
   final Value<int> rowid;
   const LocalProductionTransactionsCompanion({
     this.id = const Value.absent(),
+    this.accountScope = const Value.absent(),
     this.serialNumber = const Value.absent(),
     this.barcodeValue = const Value.absent(),
     this.productId = const Value.absent(),
@@ -4686,6 +4830,7 @@ class LocalProductionTransactionsCompanion
   });
   LocalProductionTransactionsCompanion.insert({
     required String id,
+    this.accountScope = const Value.absent(),
     required String serialNumber,
     required String barcodeValue,
     required String productId,
@@ -4717,6 +4862,7 @@ class LocalProductionTransactionsCompanion
        capturedAt = Value(capturedAt);
   static Insertable<LocalProductionTransaction> custom({
     Expression<String>? id,
+    Expression<String>? accountScope,
     Expression<String>? serialNumber,
     Expression<String>? barcodeValue,
     Expression<String>? productId,
@@ -4738,6 +4884,7 @@ class LocalProductionTransactionsCompanion
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
+      if (accountScope != null) 'account_scope': accountScope,
       if (serialNumber != null) 'serial_number': serialNumber,
       if (barcodeValue != null) 'barcode_value': barcodeValue,
       if (productId != null) 'product_id': productId,
@@ -4762,6 +4909,7 @@ class LocalProductionTransactionsCompanion
 
   LocalProductionTransactionsCompanion copyWith({
     Value<String>? id,
+    Value<String>? accountScope,
     Value<String>? serialNumber,
     Value<String>? barcodeValue,
     Value<String>? productId,
@@ -4783,6 +4931,7 @@ class LocalProductionTransactionsCompanion
   }) {
     return LocalProductionTransactionsCompanion(
       id: id ?? this.id,
+      accountScope: accountScope ?? this.accountScope,
       serialNumber: serialNumber ?? this.serialNumber,
       barcodeValue: barcodeValue ?? this.barcodeValue,
       productId: productId ?? this.productId,
@@ -4809,6 +4958,9 @@ class LocalProductionTransactionsCompanion
     final map = <String, Expression>{};
     if (id.present) {
       map['id'] = Variable<String>(id.value);
+    }
+    if (accountScope.present) {
+      map['account_scope'] = Variable<String>(accountScope.value);
     }
     if (serialNumber.present) {
       map['serial_number'] = Variable<String>(serialNumber.value);
@@ -4873,6 +5025,7 @@ class LocalProductionTransactionsCompanion
   String toString() {
     return (StringBuffer('LocalProductionTransactionsCompanion(')
           ..write('id: $id, ')
+          ..write('accountScope: $accountScope, ')
           ..write('serialNumber: $serialNumber, ')
           ..write('barcodeValue: $barcodeValue, ')
           ..write('productId: $productId, ')
@@ -4910,6 +5063,18 @@ class $LocalInventoryLedgerTable extends LocalInventoryLedger
     false,
     type: DriftSqlType.string,
     requiredDuringInsert: true,
+  );
+  static const VerificationMeta _accountScopeMeta = const VerificationMeta(
+    'accountScope',
+  );
+  @override
+  late final GeneratedColumn<String> accountScope = GeneratedColumn<String>(
+    'account_scope',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('legacy'),
   );
   static const VerificationMeta _productIdMeta = const VerificationMeta(
     'productId',
@@ -5036,6 +5201,7 @@ class $LocalInventoryLedgerTable extends LocalInventoryLedger
   @override
   List<GeneratedColumn> get $columns => [
     id,
+    accountScope,
     productId,
     variantId,
     serialNumber,
@@ -5064,6 +5230,15 @@ class $LocalInventoryLedgerTable extends LocalInventoryLedger
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
     } else if (isInserting) {
       context.missing(_idMeta);
+    }
+    if (data.containsKey('account_scope')) {
+      context.handle(
+        _accountScopeMeta,
+        accountScope.isAcceptableOrUnknown(
+          data['account_scope']!,
+          _accountScopeMeta,
+        ),
+      );
     }
     if (data.containsKey('product_id')) {
       context.handle(
@@ -5180,6 +5355,10 @@ class $LocalInventoryLedgerTable extends LocalInventoryLedger
         DriftSqlType.string,
         data['${effectivePrefix}id'],
       )!,
+      accountScope: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}account_scope'],
+      )!,
       productId: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}product_id'],
@@ -5236,6 +5415,7 @@ class $LocalInventoryLedgerTable extends LocalInventoryLedger
 class LocalInventoryLedgerData extends DataClass
     implements Insertable<LocalInventoryLedgerData> {
   final String id;
+  final String accountScope;
   final String productId;
   final String? variantId;
   final String? serialNumber;
@@ -5249,6 +5429,7 @@ class LocalInventoryLedgerData extends DataClass
   final DateTime occurredAt;
   const LocalInventoryLedgerData({
     required this.id,
+    required this.accountScope,
     required this.productId,
     this.variantId,
     this.serialNumber,
@@ -5265,6 +5446,7 @@ class LocalInventoryLedgerData extends DataClass
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['id'] = Variable<String>(id);
+    map['account_scope'] = Variable<String>(accountScope);
     map['product_id'] = Variable<String>(productId);
     if (!nullToAbsent || variantId != null) {
       map['variant_id'] = Variable<String>(variantId);
@@ -5290,6 +5472,7 @@ class LocalInventoryLedgerData extends DataClass
   LocalInventoryLedgerCompanion toCompanion(bool nullToAbsent) {
     return LocalInventoryLedgerCompanion(
       id: Value(id),
+      accountScope: Value(accountScope),
       productId: Value(productId),
       variantId: variantId == null && nullToAbsent
           ? const Value.absent()
@@ -5319,6 +5502,7 @@ class LocalInventoryLedgerData extends DataClass
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return LocalInventoryLedgerData(
       id: serializer.fromJson<String>(json['id']),
+      accountScope: serializer.fromJson<String>(json['accountScope']),
       productId: serializer.fromJson<String>(json['productId']),
       variantId: serializer.fromJson<String?>(json['variantId']),
       serialNumber: serializer.fromJson<String?>(json['serialNumber']),
@@ -5337,6 +5521,7 @@ class LocalInventoryLedgerData extends DataClass
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
       'id': serializer.toJson<String>(id),
+      'accountScope': serializer.toJson<String>(accountScope),
       'productId': serializer.toJson<String>(productId),
       'variantId': serializer.toJson<String?>(variantId),
       'serialNumber': serializer.toJson<String?>(serialNumber),
@@ -5353,6 +5538,7 @@ class LocalInventoryLedgerData extends DataClass
 
   LocalInventoryLedgerData copyWith({
     String? id,
+    String? accountScope,
     String? productId,
     Value<String?> variantId = const Value.absent(),
     Value<String?> serialNumber = const Value.absent(),
@@ -5366,6 +5552,7 @@ class LocalInventoryLedgerData extends DataClass
     DateTime? occurredAt,
   }) => LocalInventoryLedgerData(
     id: id ?? this.id,
+    accountScope: accountScope ?? this.accountScope,
     productId: productId ?? this.productId,
     variantId: variantId.present ? variantId.value : this.variantId,
     serialNumber: serialNumber.present ? serialNumber.value : this.serialNumber,
@@ -5385,6 +5572,9 @@ class LocalInventoryLedgerData extends DataClass
   ) {
     return LocalInventoryLedgerData(
       id: data.id.present ? data.id.value : this.id,
+      accountScope: data.accountScope.present
+          ? data.accountScope.value
+          : this.accountScope,
       productId: data.productId.present ? data.productId.value : this.productId,
       variantId: data.variantId.present ? data.variantId.value : this.variantId,
       serialNumber: data.serialNumber.present
@@ -5421,6 +5611,7 @@ class LocalInventoryLedgerData extends DataClass
   String toString() {
     return (StringBuffer('LocalInventoryLedgerData(')
           ..write('id: $id, ')
+          ..write('accountScope: $accountScope, ')
           ..write('productId: $productId, ')
           ..write('variantId: $variantId, ')
           ..write('serialNumber: $serialNumber, ')
@@ -5439,6 +5630,7 @@ class LocalInventoryLedgerData extends DataClass
   @override
   int get hashCode => Object.hash(
     id,
+    accountScope,
     productId,
     variantId,
     serialNumber,
@@ -5456,6 +5648,7 @@ class LocalInventoryLedgerData extends DataClass
       identical(this, other) ||
       (other is LocalInventoryLedgerData &&
           other.id == this.id &&
+          other.accountScope == this.accountScope &&
           other.productId == this.productId &&
           other.variantId == this.variantId &&
           other.serialNumber == this.serialNumber &&
@@ -5472,6 +5665,7 @@ class LocalInventoryLedgerData extends DataClass
 class LocalInventoryLedgerCompanion
     extends UpdateCompanion<LocalInventoryLedgerData> {
   final Value<String> id;
+  final Value<String> accountScope;
   final Value<String> productId;
   final Value<String?> variantId;
   final Value<String?> serialNumber;
@@ -5486,6 +5680,7 @@ class LocalInventoryLedgerCompanion
   final Value<int> rowid;
   const LocalInventoryLedgerCompanion({
     this.id = const Value.absent(),
+    this.accountScope = const Value.absent(),
     this.productId = const Value.absent(),
     this.variantId = const Value.absent(),
     this.serialNumber = const Value.absent(),
@@ -5501,6 +5696,7 @@ class LocalInventoryLedgerCompanion
   });
   LocalInventoryLedgerCompanion.insert({
     required String id,
+    this.accountScope = const Value.absent(),
     required String productId,
     this.variantId = const Value.absent(),
     this.serialNumber = const Value.absent(),
@@ -5522,6 +5718,7 @@ class LocalInventoryLedgerCompanion
        occurredAt = Value(occurredAt);
   static Insertable<LocalInventoryLedgerData> custom({
     Expression<String>? id,
+    Expression<String>? accountScope,
     Expression<String>? productId,
     Expression<String>? variantId,
     Expression<String>? serialNumber,
@@ -5537,6 +5734,7 @@ class LocalInventoryLedgerCompanion
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
+      if (accountScope != null) 'account_scope': accountScope,
       if (productId != null) 'product_id': productId,
       if (variantId != null) 'variant_id': variantId,
       if (serialNumber != null) 'serial_number': serialNumber,
@@ -5554,6 +5752,7 @@ class LocalInventoryLedgerCompanion
 
   LocalInventoryLedgerCompanion copyWith({
     Value<String>? id,
+    Value<String>? accountScope,
     Value<String>? productId,
     Value<String?>? variantId,
     Value<String?>? serialNumber,
@@ -5569,6 +5768,7 @@ class LocalInventoryLedgerCompanion
   }) {
     return LocalInventoryLedgerCompanion(
       id: id ?? this.id,
+      accountScope: accountScope ?? this.accountScope,
       productId: productId ?? this.productId,
       variantId: variantId ?? this.variantId,
       serialNumber: serialNumber ?? this.serialNumber,
@@ -5589,6 +5789,9 @@ class LocalInventoryLedgerCompanion
     final map = <String, Expression>{};
     if (id.present) {
       map['id'] = Variable<String>(id.value);
+    }
+    if (accountScope.present) {
+      map['account_scope'] = Variable<String>(accountScope.value);
     }
     if (productId.present) {
       map['product_id'] = Variable<String>(productId.value);
@@ -5633,6 +5836,7 @@ class LocalInventoryLedgerCompanion
   String toString() {
     return (StringBuffer('LocalInventoryLedgerCompanion(')
           ..write('id: $id, ')
+          ..write('accountScope: $accountScope, ')
           ..write('productId: $productId, ')
           ..write('variantId: $variantId, ')
           ..write('serialNumber: $serialNumber, ')
@@ -6022,6 +6226,18 @@ class $LocalDispatchesTable extends LocalDispatches
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _accountScopeMeta = const VerificationMeta(
+    'accountScope',
+  );
+  @override
+  late final GeneratedColumn<String> accountScope = GeneratedColumn<String>(
+    'account_scope',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('legacy'),
+  );
   static const VerificationMeta _dispatchNumberMeta = const VerificationMeta(
     'dispatchNumber',
   );
@@ -6138,6 +6354,7 @@ class $LocalDispatchesTable extends LocalDispatches
   @override
   List<GeneratedColumn> get $columns => [
     id,
+    accountScope,
     dispatchNumber,
     customerId,
     customerSnapshotJson,
@@ -6165,6 +6382,15 @@ class $LocalDispatchesTable extends LocalDispatches
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
     } else if (isInserting) {
       context.missing(_idMeta);
+    }
+    if (data.containsKey('account_scope')) {
+      context.handle(
+        _accountScopeMeta,
+        accountScope.isAcceptableOrUnknown(
+          data['account_scope']!,
+          _accountScopeMeta,
+        ),
+      );
     }
     if (data.containsKey('dispatch_number')) {
       context.handle(
@@ -6267,6 +6493,10 @@ class $LocalDispatchesTable extends LocalDispatches
         DriftSqlType.string,
         data['${effectivePrefix}id'],
       )!,
+      accountScope: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}account_scope'],
+      )!,
       dispatchNumber: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}dispatch_number'],
@@ -6318,6 +6548,7 @@ class $LocalDispatchesTable extends LocalDispatches
 
 class LocalDispatche extends DataClass implements Insertable<LocalDispatche> {
   final String id;
+  final String accountScope;
   final String dispatchNumber;
   final String customerId;
   final String customerSnapshotJson;
@@ -6330,6 +6561,7 @@ class LocalDispatche extends DataClass implements Insertable<LocalDispatche> {
   final DateTime? confirmedAt;
   const LocalDispatche({
     required this.id,
+    required this.accountScope,
     required this.dispatchNumber,
     required this.customerId,
     required this.customerSnapshotJson,
@@ -6345,6 +6577,7 @@ class LocalDispatche extends DataClass implements Insertable<LocalDispatche> {
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['id'] = Variable<String>(id);
+    map['account_scope'] = Variable<String>(accountScope);
     map['dispatch_number'] = Variable<String>(dispatchNumber);
     map['customer_id'] = Variable<String>(customerId);
     map['customer_snapshot_json'] = Variable<String>(customerSnapshotJson);
@@ -6365,6 +6598,7 @@ class LocalDispatche extends DataClass implements Insertable<LocalDispatche> {
   LocalDispatchesCompanion toCompanion(bool nullToAbsent) {
     return LocalDispatchesCompanion(
       id: Value(id),
+      accountScope: Value(accountScope),
       dispatchNumber: Value(dispatchNumber),
       customerId: Value(customerId),
       customerSnapshotJson: Value(customerSnapshotJson),
@@ -6389,6 +6623,7 @@ class LocalDispatche extends DataClass implements Insertable<LocalDispatche> {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return LocalDispatche(
       id: serializer.fromJson<String>(json['id']),
+      accountScope: serializer.fromJson<String>(json['accountScope']),
       dispatchNumber: serializer.fromJson<String>(json['dispatchNumber']),
       customerId: serializer.fromJson<String>(json['customerId']),
       customerSnapshotJson: serializer.fromJson<String>(
@@ -6408,6 +6643,7 @@ class LocalDispatche extends DataClass implements Insertable<LocalDispatche> {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
       'id': serializer.toJson<String>(id),
+      'accountScope': serializer.toJson<String>(accountScope),
       'dispatchNumber': serializer.toJson<String>(dispatchNumber),
       'customerId': serializer.toJson<String>(customerId),
       'customerSnapshotJson': serializer.toJson<String>(customerSnapshotJson),
@@ -6423,6 +6659,7 @@ class LocalDispatche extends DataClass implements Insertable<LocalDispatche> {
 
   LocalDispatche copyWith({
     String? id,
+    String? accountScope,
     String? dispatchNumber,
     String? customerId,
     String? customerSnapshotJson,
@@ -6435,6 +6672,7 @@ class LocalDispatche extends DataClass implements Insertable<LocalDispatche> {
     Value<DateTime?> confirmedAt = const Value.absent(),
   }) => LocalDispatche(
     id: id ?? this.id,
+    accountScope: accountScope ?? this.accountScope,
     dispatchNumber: dispatchNumber ?? this.dispatchNumber,
     customerId: customerId ?? this.customerId,
     customerSnapshotJson: customerSnapshotJson ?? this.customerSnapshotJson,
@@ -6449,6 +6687,9 @@ class LocalDispatche extends DataClass implements Insertable<LocalDispatche> {
   LocalDispatche copyWithCompanion(LocalDispatchesCompanion data) {
     return LocalDispatche(
       id: data.id.present ? data.id.value : this.id,
+      accountScope: data.accountScope.present
+          ? data.accountScope.value
+          : this.accountScope,
       dispatchNumber: data.dispatchNumber.present
           ? data.dispatchNumber.value
           : this.dispatchNumber,
@@ -6482,6 +6723,7 @@ class LocalDispatche extends DataClass implements Insertable<LocalDispatche> {
   String toString() {
     return (StringBuffer('LocalDispatche(')
           ..write('id: $id, ')
+          ..write('accountScope: $accountScope, ')
           ..write('dispatchNumber: $dispatchNumber, ')
           ..write('customerId: $customerId, ')
           ..write('customerSnapshotJson: $customerSnapshotJson, ')
@@ -6499,6 +6741,7 @@ class LocalDispatche extends DataClass implements Insertable<LocalDispatche> {
   @override
   int get hashCode => Object.hash(
     id,
+    accountScope,
     dispatchNumber,
     customerId,
     customerSnapshotJson,
@@ -6515,6 +6758,7 @@ class LocalDispatche extends DataClass implements Insertable<LocalDispatche> {
       identical(this, other) ||
       (other is LocalDispatche &&
           other.id == this.id &&
+          other.accountScope == this.accountScope &&
           other.dispatchNumber == this.dispatchNumber &&
           other.customerId == this.customerId &&
           other.customerSnapshotJson == this.customerSnapshotJson &&
@@ -6529,6 +6773,7 @@ class LocalDispatche extends DataClass implements Insertable<LocalDispatche> {
 
 class LocalDispatchesCompanion extends UpdateCompanion<LocalDispatche> {
   final Value<String> id;
+  final Value<String> accountScope;
   final Value<String> dispatchNumber;
   final Value<String> customerId;
   final Value<String> customerSnapshotJson;
@@ -6542,6 +6787,7 @@ class LocalDispatchesCompanion extends UpdateCompanion<LocalDispatche> {
   final Value<int> rowid;
   const LocalDispatchesCompanion({
     this.id = const Value.absent(),
+    this.accountScope = const Value.absent(),
     this.dispatchNumber = const Value.absent(),
     this.customerId = const Value.absent(),
     this.customerSnapshotJson = const Value.absent(),
@@ -6556,6 +6802,7 @@ class LocalDispatchesCompanion extends UpdateCompanion<LocalDispatche> {
   });
   LocalDispatchesCompanion.insert({
     required String id,
+    this.accountScope = const Value.absent(),
     required String dispatchNumber,
     required String customerId,
     required String customerSnapshotJson,
@@ -6575,6 +6822,7 @@ class LocalDispatchesCompanion extends UpdateCompanion<LocalDispatche> {
        createdAt = Value(createdAt);
   static Insertable<LocalDispatche> custom({
     Expression<String>? id,
+    Expression<String>? accountScope,
     Expression<String>? dispatchNumber,
     Expression<String>? customerId,
     Expression<String>? customerSnapshotJson,
@@ -6589,6 +6837,7 @@ class LocalDispatchesCompanion extends UpdateCompanion<LocalDispatche> {
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
+      if (accountScope != null) 'account_scope': accountScope,
       if (dispatchNumber != null) 'dispatch_number': dispatchNumber,
       if (customerId != null) 'customer_id': customerId,
       if (customerSnapshotJson != null)
@@ -6606,6 +6855,7 @@ class LocalDispatchesCompanion extends UpdateCompanion<LocalDispatche> {
 
   LocalDispatchesCompanion copyWith({
     Value<String>? id,
+    Value<String>? accountScope,
     Value<String>? dispatchNumber,
     Value<String>? customerId,
     Value<String>? customerSnapshotJson,
@@ -6620,6 +6870,7 @@ class LocalDispatchesCompanion extends UpdateCompanion<LocalDispatche> {
   }) {
     return LocalDispatchesCompanion(
       id: id ?? this.id,
+      accountScope: accountScope ?? this.accountScope,
       dispatchNumber: dispatchNumber ?? this.dispatchNumber,
       customerId: customerId ?? this.customerId,
       customerSnapshotJson: customerSnapshotJson ?? this.customerSnapshotJson,
@@ -6639,6 +6890,9 @@ class LocalDispatchesCompanion extends UpdateCompanion<LocalDispatche> {
     final map = <String, Expression>{};
     if (id.present) {
       map['id'] = Variable<String>(id.value);
+    }
+    if (accountScope.present) {
+      map['account_scope'] = Variable<String>(accountScope.value);
     }
     if (dispatchNumber.present) {
       map['dispatch_number'] = Variable<String>(dispatchNumber.value);
@@ -6682,6 +6936,7 @@ class LocalDispatchesCompanion extends UpdateCompanion<LocalDispatche> {
   String toString() {
     return (StringBuffer('LocalDispatchesCompanion(')
           ..write('id: $id, ')
+          ..write('accountScope: $accountScope, ')
           ..write('dispatchNumber: $dispatchNumber, ')
           ..write('customerId: $customerId, ')
           ..write('customerSnapshotJson: $customerSnapshotJson, ')
@@ -6712,6 +6967,18 @@ class $LocalDispatchItemsTable extends LocalDispatchItems
     false,
     type: DriftSqlType.string,
     requiredDuringInsert: true,
+  );
+  static const VerificationMeta _accountScopeMeta = const VerificationMeta(
+    'accountScope',
+  );
+  @override
+  late final GeneratedColumn<String> accountScope = GeneratedColumn<String>(
+    'account_scope',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('legacy'),
   );
   static const VerificationMeta _dispatchIdMeta = const VerificationMeta(
     'dispatchId',
@@ -6771,6 +7038,7 @@ class $LocalDispatchItemsTable extends LocalDispatchItems
   @override
   List<GeneratedColumn> get $columns => [
     id,
+    accountScope,
     dispatchId,
     productionTransactionId,
     barcodeValue,
@@ -6793,6 +7061,15 @@ class $LocalDispatchItemsTable extends LocalDispatchItems
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
     } else if (isInserting) {
       context.missing(_idMeta);
+    }
+    if (data.containsKey('account_scope')) {
+      context.handle(
+        _accountScopeMeta,
+        accountScope.isAcceptableOrUnknown(
+          data['account_scope']!,
+          _accountScopeMeta,
+        ),
+      );
     }
     if (data.containsKey('dispatch_id')) {
       context.handle(
@@ -6857,6 +7134,10 @@ class $LocalDispatchItemsTable extends LocalDispatchItems
         DriftSqlType.string,
         data['${effectivePrefix}id'],
       )!,
+      accountScope: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}account_scope'],
+      )!,
       dispatchId: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}dispatch_id'],
@@ -6889,6 +7170,7 @@ class $LocalDispatchItemsTable extends LocalDispatchItems
 class LocalDispatchItem extends DataClass
     implements Insertable<LocalDispatchItem> {
   final String id;
+  final String accountScope;
   final String dispatchId;
   final String productionTransactionId;
   final String barcodeValue;
@@ -6896,6 +7178,7 @@ class LocalDispatchItem extends DataClass
   final double? pieceQuantity;
   const LocalDispatchItem({
     required this.id,
+    required this.accountScope,
     required this.dispatchId,
     required this.productionTransactionId,
     required this.barcodeValue,
@@ -6906,6 +7189,7 @@ class LocalDispatchItem extends DataClass
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['id'] = Variable<String>(id);
+    map['account_scope'] = Variable<String>(accountScope);
     map['dispatch_id'] = Variable<String>(dispatchId);
     map['production_transaction_id'] = Variable<String>(
       productionTransactionId,
@@ -6921,6 +7205,7 @@ class LocalDispatchItem extends DataClass
   LocalDispatchItemsCompanion toCompanion(bool nullToAbsent) {
     return LocalDispatchItemsCompanion(
       id: Value(id),
+      accountScope: Value(accountScope),
       dispatchId: Value(dispatchId),
       productionTransactionId: Value(productionTransactionId),
       barcodeValue: Value(barcodeValue),
@@ -6938,6 +7223,7 @@ class LocalDispatchItem extends DataClass
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return LocalDispatchItem(
       id: serializer.fromJson<String>(json['id']),
+      accountScope: serializer.fromJson<String>(json['accountScope']),
       dispatchId: serializer.fromJson<String>(json['dispatchId']),
       productionTransactionId: serializer.fromJson<String>(
         json['productionTransactionId'],
@@ -6952,6 +7238,7 @@ class LocalDispatchItem extends DataClass
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
       'id': serializer.toJson<String>(id),
+      'accountScope': serializer.toJson<String>(accountScope),
       'dispatchId': serializer.toJson<String>(dispatchId),
       'productionTransactionId': serializer.toJson<String>(
         productionTransactionId,
@@ -6964,6 +7251,7 @@ class LocalDispatchItem extends DataClass
 
   LocalDispatchItem copyWith({
     String? id,
+    String? accountScope,
     String? dispatchId,
     String? productionTransactionId,
     String? barcodeValue,
@@ -6971,6 +7259,7 @@ class LocalDispatchItem extends DataClass
     Value<double?> pieceQuantity = const Value.absent(),
   }) => LocalDispatchItem(
     id: id ?? this.id,
+    accountScope: accountScope ?? this.accountScope,
     dispatchId: dispatchId ?? this.dispatchId,
     productionTransactionId:
         productionTransactionId ?? this.productionTransactionId,
@@ -6983,6 +7272,9 @@ class LocalDispatchItem extends DataClass
   LocalDispatchItem copyWithCompanion(LocalDispatchItemsCompanion data) {
     return LocalDispatchItem(
       id: data.id.present ? data.id.value : this.id,
+      accountScope: data.accountScope.present
+          ? data.accountScope.value
+          : this.accountScope,
       dispatchId: data.dispatchId.present
           ? data.dispatchId.value
           : this.dispatchId,
@@ -7005,6 +7297,7 @@ class LocalDispatchItem extends DataClass
   String toString() {
     return (StringBuffer('LocalDispatchItem(')
           ..write('id: $id, ')
+          ..write('accountScope: $accountScope, ')
           ..write('dispatchId: $dispatchId, ')
           ..write('productionTransactionId: $productionTransactionId, ')
           ..write('barcodeValue: $barcodeValue, ')
@@ -7017,6 +7310,7 @@ class LocalDispatchItem extends DataClass
   @override
   int get hashCode => Object.hash(
     id,
+    accountScope,
     dispatchId,
     productionTransactionId,
     barcodeValue,
@@ -7028,6 +7322,7 @@ class LocalDispatchItem extends DataClass
       identical(this, other) ||
       (other is LocalDispatchItem &&
           other.id == this.id &&
+          other.accountScope == this.accountScope &&
           other.dispatchId == this.dispatchId &&
           other.productionTransactionId == this.productionTransactionId &&
           other.barcodeValue == this.barcodeValue &&
@@ -7037,6 +7332,7 @@ class LocalDispatchItem extends DataClass
 
 class LocalDispatchItemsCompanion extends UpdateCompanion<LocalDispatchItem> {
   final Value<String> id;
+  final Value<String> accountScope;
   final Value<String> dispatchId;
   final Value<String> productionTransactionId;
   final Value<String> barcodeValue;
@@ -7045,6 +7341,7 @@ class LocalDispatchItemsCompanion extends UpdateCompanion<LocalDispatchItem> {
   final Value<int> rowid;
   const LocalDispatchItemsCompanion({
     this.id = const Value.absent(),
+    this.accountScope = const Value.absent(),
     this.dispatchId = const Value.absent(),
     this.productionTransactionId = const Value.absent(),
     this.barcodeValue = const Value.absent(),
@@ -7054,6 +7351,7 @@ class LocalDispatchItemsCompanion extends UpdateCompanion<LocalDispatchItem> {
   });
   LocalDispatchItemsCompanion.insert({
     required String id,
+    this.accountScope = const Value.absent(),
     required String dispatchId,
     required String productionTransactionId,
     required String barcodeValue,
@@ -7067,6 +7365,7 @@ class LocalDispatchItemsCompanion extends UpdateCompanion<LocalDispatchItem> {
        weightQuantity = Value(weightQuantity);
   static Insertable<LocalDispatchItem> custom({
     Expression<String>? id,
+    Expression<String>? accountScope,
     Expression<String>? dispatchId,
     Expression<String>? productionTransactionId,
     Expression<String>? barcodeValue,
@@ -7076,6 +7375,7 @@ class LocalDispatchItemsCompanion extends UpdateCompanion<LocalDispatchItem> {
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
+      if (accountScope != null) 'account_scope': accountScope,
       if (dispatchId != null) 'dispatch_id': dispatchId,
       if (productionTransactionId != null)
         'production_transaction_id': productionTransactionId,
@@ -7088,6 +7388,7 @@ class LocalDispatchItemsCompanion extends UpdateCompanion<LocalDispatchItem> {
 
   LocalDispatchItemsCompanion copyWith({
     Value<String>? id,
+    Value<String>? accountScope,
     Value<String>? dispatchId,
     Value<String>? productionTransactionId,
     Value<String>? barcodeValue,
@@ -7097,6 +7398,7 @@ class LocalDispatchItemsCompanion extends UpdateCompanion<LocalDispatchItem> {
   }) {
     return LocalDispatchItemsCompanion(
       id: id ?? this.id,
+      accountScope: accountScope ?? this.accountScope,
       dispatchId: dispatchId ?? this.dispatchId,
       productionTransactionId:
           productionTransactionId ?? this.productionTransactionId,
@@ -7112,6 +7414,9 @@ class LocalDispatchItemsCompanion extends UpdateCompanion<LocalDispatchItem> {
     final map = <String, Expression>{};
     if (id.present) {
       map['id'] = Variable<String>(id.value);
+    }
+    if (accountScope.present) {
+      map['account_scope'] = Variable<String>(accountScope.value);
     }
     if (dispatchId.present) {
       map['dispatch_id'] = Variable<String>(dispatchId.value);
@@ -7140,6 +7445,7 @@ class LocalDispatchItemsCompanion extends UpdateCompanion<LocalDispatchItem> {
   String toString() {
     return (StringBuffer('LocalDispatchItemsCompanion(')
           ..write('id: $id, ')
+          ..write('accountScope: $accountScope, ')
           ..write('dispatchId: $dispatchId, ')
           ..write('productionTransactionId: $productionTransactionId, ')
           ..write('barcodeValue: $barcodeValue, ')
@@ -7202,6 +7508,7 @@ abstract class _$LocalDatabase extends GeneratedDatabase {
 typedef $$LocalSyncQueueTableCreateCompanionBuilder =
     LocalSyncQueueCompanion Function({
       required String id,
+      Value<String> accountScope,
       required String entityType,
       required String operation,
       required String idempotencyKey,
@@ -7215,6 +7522,7 @@ typedef $$LocalSyncQueueTableCreateCompanionBuilder =
 typedef $$LocalSyncQueueTableUpdateCompanionBuilder =
     LocalSyncQueueCompanion Function({
       Value<String> id,
+      Value<String> accountScope,
       Value<String> entityType,
       Value<String> operation,
       Value<String> idempotencyKey,
@@ -7237,6 +7545,11 @@ class $$LocalSyncQueueTableFilterComposer
   });
   ColumnFilters<String> get id => $composableBuilder(
     column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get accountScope => $composableBuilder(
+    column: $table.accountScope,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -7295,6 +7608,11 @@ class $$LocalSyncQueueTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get accountScope => $composableBuilder(
+    column: $table.accountScope,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get entityType => $composableBuilder(
     column: $table.entityType,
     builder: (column) => ColumnOrderings(column),
@@ -7347,6 +7665,11 @@ class $$LocalSyncQueueTableAnnotationComposer
   });
   GeneratedColumn<String> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get accountScope => $composableBuilder(
+    column: $table.accountScope,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<String> get entityType => $composableBuilder(
     column: $table.entityType,
@@ -7419,6 +7742,7 @@ class $$LocalSyncQueueTableTableManager
           updateCompanionCallback:
               ({
                 Value<String> id = const Value.absent(),
+                Value<String> accountScope = const Value.absent(),
                 Value<String> entityType = const Value.absent(),
                 Value<String> operation = const Value.absent(),
                 Value<String> idempotencyKey = const Value.absent(),
@@ -7430,6 +7754,7 @@ class $$LocalSyncQueueTableTableManager
                 Value<int> rowid = const Value.absent(),
               }) => LocalSyncQueueCompanion(
                 id: id,
+                accountScope: accountScope,
                 entityType: entityType,
                 operation: operation,
                 idempotencyKey: idempotencyKey,
@@ -7443,6 +7768,7 @@ class $$LocalSyncQueueTableTableManager
           createCompanionCallback:
               ({
                 required String id,
+                Value<String> accountScope = const Value.absent(),
                 required String entityType,
                 required String operation,
                 required String idempotencyKey,
@@ -7454,6 +7780,7 @@ class $$LocalSyncQueueTableTableManager
                 Value<int> rowid = const Value.absent(),
               }) => LocalSyncQueueCompanion.insert(
                 id: id,
+                accountScope: accountScope,
                 entityType: entityType,
                 operation: operation,
                 idempotencyKey: idempotencyKey,
@@ -8955,6 +9282,7 @@ typedef $$LocalScaleProfilesTableProcessedTableManager =
 typedef $$LocalInwardSessionsTableCreateCompanionBuilder =
     LocalInwardSessionsCompanion Function({
       required String id,
+      Value<String> accountScope,
       required String sessionNumber,
       Value<String> status,
       Value<int> entryCount,
@@ -8969,6 +9297,7 @@ typedef $$LocalInwardSessionsTableCreateCompanionBuilder =
 typedef $$LocalInwardSessionsTableUpdateCompanionBuilder =
     LocalInwardSessionsCompanion Function({
       Value<String> id,
+      Value<String> accountScope,
       Value<String> sessionNumber,
       Value<String> status,
       Value<int> entryCount,
@@ -8992,6 +9321,11 @@ class $$LocalInwardSessionsTableFilterComposer
   });
   ColumnFilters<String> get id => $composableBuilder(
     column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get accountScope => $composableBuilder(
+    column: $table.accountScope,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -9055,6 +9389,11 @@ class $$LocalInwardSessionsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get accountScope => $composableBuilder(
+    column: $table.accountScope,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get sessionNumber => $composableBuilder(
     column: $table.sessionNumber,
     builder: (column) => ColumnOrderings(column),
@@ -9112,6 +9451,11 @@ class $$LocalInwardSessionsTableAnnotationComposer
   });
   GeneratedColumn<String> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get accountScope => $composableBuilder(
+    column: $table.accountScope,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<String> get sessionNumber => $composableBuilder(
     column: $table.sessionNumber,
@@ -9197,6 +9541,7 @@ class $$LocalInwardSessionsTableTableManager
           updateCompanionCallback:
               ({
                 Value<String> id = const Value.absent(),
+                Value<String> accountScope = const Value.absent(),
                 Value<String> sessionNumber = const Value.absent(),
                 Value<String> status = const Value.absent(),
                 Value<int> entryCount = const Value.absent(),
@@ -9209,6 +9554,7 @@ class $$LocalInwardSessionsTableTableManager
                 Value<int> rowid = const Value.absent(),
               }) => LocalInwardSessionsCompanion(
                 id: id,
+                accountScope: accountScope,
                 sessionNumber: sessionNumber,
                 status: status,
                 entryCount: entryCount,
@@ -9223,6 +9569,7 @@ class $$LocalInwardSessionsTableTableManager
           createCompanionCallback:
               ({
                 required String id,
+                Value<String> accountScope = const Value.absent(),
                 required String sessionNumber,
                 Value<String> status = const Value.absent(),
                 Value<int> entryCount = const Value.absent(),
@@ -9235,6 +9582,7 @@ class $$LocalInwardSessionsTableTableManager
                 Value<int> rowid = const Value.absent(),
               }) => LocalInwardSessionsCompanion.insert(
                 id: id,
+                accountScope: accountScope,
                 sessionNumber: sessionNumber,
                 status: status,
                 entryCount: entryCount,
@@ -9278,6 +9626,7 @@ typedef $$LocalInwardSessionsTableProcessedTableManager =
 typedef $$LocalProductionTransactionsTableCreateCompanionBuilder =
     LocalProductionTransactionsCompanion Function({
       required String id,
+      Value<String> accountScope,
       required String serialNumber,
       required String barcodeValue,
       required String productId,
@@ -9300,6 +9649,7 @@ typedef $$LocalProductionTransactionsTableCreateCompanionBuilder =
 typedef $$LocalProductionTransactionsTableUpdateCompanionBuilder =
     LocalProductionTransactionsCompanion Function({
       Value<String> id,
+      Value<String> accountScope,
       Value<String> serialNumber,
       Value<String> barcodeValue,
       Value<String> productId,
@@ -9331,6 +9681,11 @@ class $$LocalProductionTransactionsTableFilterComposer
   });
   ColumnFilters<String> get id => $composableBuilder(
     column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get accountScope => $composableBuilder(
+    column: $table.accountScope,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -9434,6 +9789,11 @@ class $$LocalProductionTransactionsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get accountScope => $composableBuilder(
+    column: $table.accountScope,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get serialNumber => $composableBuilder(
     column: $table.serialNumber,
     builder: (column) => ColumnOrderings(column),
@@ -9531,6 +9891,11 @@ class $$LocalProductionTransactionsTableAnnotationComposer
   });
   GeneratedColumn<String> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get accountScope => $composableBuilder(
+    column: $table.accountScope,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<String> get serialNumber => $composableBuilder(
     column: $table.serialNumber,
@@ -9655,6 +10020,7 @@ class $$LocalProductionTransactionsTableTableManager
           updateCompanionCallback:
               ({
                 Value<String> id = const Value.absent(),
+                Value<String> accountScope = const Value.absent(),
                 Value<String> serialNumber = const Value.absent(),
                 Value<String> barcodeValue = const Value.absent(),
                 Value<String> productId = const Value.absent(),
@@ -9675,6 +10041,7 @@ class $$LocalProductionTransactionsTableTableManager
                 Value<int> rowid = const Value.absent(),
               }) => LocalProductionTransactionsCompanion(
                 id: id,
+                accountScope: accountScope,
                 serialNumber: serialNumber,
                 barcodeValue: barcodeValue,
                 productId: productId,
@@ -9697,6 +10064,7 @@ class $$LocalProductionTransactionsTableTableManager
           createCompanionCallback:
               ({
                 required String id,
+                Value<String> accountScope = const Value.absent(),
                 required String serialNumber,
                 required String barcodeValue,
                 required String productId,
@@ -9717,6 +10085,7 @@ class $$LocalProductionTransactionsTableTableManager
                 Value<int> rowid = const Value.absent(),
               }) => LocalProductionTransactionsCompanion.insert(
                 id: id,
+                accountScope: accountScope,
                 serialNumber: serialNumber,
                 barcodeValue: barcodeValue,
                 productId: productId,
@@ -9768,6 +10137,7 @@ typedef $$LocalProductionTransactionsTableProcessedTableManager =
 typedef $$LocalInventoryLedgerTableCreateCompanionBuilder =
     LocalInventoryLedgerCompanion Function({
       required String id,
+      Value<String> accountScope,
       required String productId,
       Value<String?> variantId,
       Value<String?> serialNumber,
@@ -9784,6 +10154,7 @@ typedef $$LocalInventoryLedgerTableCreateCompanionBuilder =
 typedef $$LocalInventoryLedgerTableUpdateCompanionBuilder =
     LocalInventoryLedgerCompanion Function({
       Value<String> id,
+      Value<String> accountScope,
       Value<String> productId,
       Value<String?> variantId,
       Value<String?> serialNumber,
@@ -9809,6 +10180,11 @@ class $$LocalInventoryLedgerTableFilterComposer
   });
   ColumnFilters<String> get id => $composableBuilder(
     column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get accountScope => $composableBuilder(
+    column: $table.accountScope,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -9882,6 +10258,11 @@ class $$LocalInventoryLedgerTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get accountScope => $composableBuilder(
+    column: $table.accountScope,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get productId => $composableBuilder(
     column: $table.productId,
     builder: (column) => ColumnOrderings(column),
@@ -9949,6 +10330,11 @@ class $$LocalInventoryLedgerTableAnnotationComposer
   });
   GeneratedColumn<String> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get accountScope => $composableBuilder(
+    column: $table.accountScope,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<String> get productId =>
       $composableBuilder(column: $table.productId, builder: (column) => column);
@@ -10046,6 +10432,7 @@ class $$LocalInventoryLedgerTableTableManager
           updateCompanionCallback:
               ({
                 Value<String> id = const Value.absent(),
+                Value<String> accountScope = const Value.absent(),
                 Value<String> productId = const Value.absent(),
                 Value<String?> variantId = const Value.absent(),
                 Value<String?> serialNumber = const Value.absent(),
@@ -10060,6 +10447,7 @@ class $$LocalInventoryLedgerTableTableManager
                 Value<int> rowid = const Value.absent(),
               }) => LocalInventoryLedgerCompanion(
                 id: id,
+                accountScope: accountScope,
                 productId: productId,
                 variantId: variantId,
                 serialNumber: serialNumber,
@@ -10076,6 +10464,7 @@ class $$LocalInventoryLedgerTableTableManager
           createCompanionCallback:
               ({
                 required String id,
+                Value<String> accountScope = const Value.absent(),
                 required String productId,
                 Value<String?> variantId = const Value.absent(),
                 Value<String?> serialNumber = const Value.absent(),
@@ -10090,6 +10479,7 @@ class $$LocalInventoryLedgerTableTableManager
                 Value<int> rowid = const Value.absent(),
               }) => LocalInventoryLedgerCompanion.insert(
                 id: id,
+                accountScope: accountScope,
                 productId: productId,
                 variantId: variantId,
                 serialNumber: serialNumber,
@@ -10343,6 +10733,7 @@ typedef $$LocalCustomersTableProcessedTableManager =
 typedef $$LocalDispatchesTableCreateCompanionBuilder =
     LocalDispatchesCompanion Function({
       required String id,
+      Value<String> accountScope,
       required String dispatchNumber,
       required String customerId,
       required String customerSnapshotJson,
@@ -10358,6 +10749,7 @@ typedef $$LocalDispatchesTableCreateCompanionBuilder =
 typedef $$LocalDispatchesTableUpdateCompanionBuilder =
     LocalDispatchesCompanion Function({
       Value<String> id,
+      Value<String> accountScope,
       Value<String> dispatchNumber,
       Value<String> customerId,
       Value<String> customerSnapshotJson,
@@ -10382,6 +10774,11 @@ class $$LocalDispatchesTableFilterComposer
   });
   ColumnFilters<String> get id => $composableBuilder(
     column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get accountScope => $composableBuilder(
+    column: $table.accountScope,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -10450,6 +10847,11 @@ class $$LocalDispatchesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get accountScope => $composableBuilder(
+    column: $table.accountScope,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get dispatchNumber => $composableBuilder(
     column: $table.dispatchNumber,
     builder: (column) => ColumnOrderings(column),
@@ -10512,6 +10914,11 @@ class $$LocalDispatchesTableAnnotationComposer
   });
   GeneratedColumn<String> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get accountScope => $composableBuilder(
+    column: $table.accountScope,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<String> get dispatchNumber => $composableBuilder(
     column: $table.dispatchNumber,
@@ -10598,6 +11005,7 @@ class $$LocalDispatchesTableTableManager
           updateCompanionCallback:
               ({
                 Value<String> id = const Value.absent(),
+                Value<String> accountScope = const Value.absent(),
                 Value<String> dispatchNumber = const Value.absent(),
                 Value<String> customerId = const Value.absent(),
                 Value<String> customerSnapshotJson = const Value.absent(),
@@ -10611,6 +11019,7 @@ class $$LocalDispatchesTableTableManager
                 Value<int> rowid = const Value.absent(),
               }) => LocalDispatchesCompanion(
                 id: id,
+                accountScope: accountScope,
                 dispatchNumber: dispatchNumber,
                 customerId: customerId,
                 customerSnapshotJson: customerSnapshotJson,
@@ -10626,6 +11035,7 @@ class $$LocalDispatchesTableTableManager
           createCompanionCallback:
               ({
                 required String id,
+                Value<String> accountScope = const Value.absent(),
                 required String dispatchNumber,
                 required String customerId,
                 required String customerSnapshotJson,
@@ -10639,6 +11049,7 @@ class $$LocalDispatchesTableTableManager
                 Value<int> rowid = const Value.absent(),
               }) => LocalDispatchesCompanion.insert(
                 id: id,
+                accountScope: accountScope,
                 dispatchNumber: dispatchNumber,
                 customerId: customerId,
                 customerSnapshotJson: customerSnapshotJson,
@@ -10679,6 +11090,7 @@ typedef $$LocalDispatchesTableProcessedTableManager =
 typedef $$LocalDispatchItemsTableCreateCompanionBuilder =
     LocalDispatchItemsCompanion Function({
       required String id,
+      Value<String> accountScope,
       required String dispatchId,
       required String productionTransactionId,
       required String barcodeValue,
@@ -10689,6 +11101,7 @@ typedef $$LocalDispatchItemsTableCreateCompanionBuilder =
 typedef $$LocalDispatchItemsTableUpdateCompanionBuilder =
     LocalDispatchItemsCompanion Function({
       Value<String> id,
+      Value<String> accountScope,
       Value<String> dispatchId,
       Value<String> productionTransactionId,
       Value<String> barcodeValue,
@@ -10708,6 +11121,11 @@ class $$LocalDispatchItemsTableFilterComposer
   });
   ColumnFilters<String> get id => $composableBuilder(
     column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get accountScope => $composableBuilder(
+    column: $table.accountScope,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -10751,6 +11169,11 @@ class $$LocalDispatchItemsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get accountScope => $composableBuilder(
+    column: $table.accountScope,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get dispatchId => $composableBuilder(
     column: $table.dispatchId,
     builder: (column) => ColumnOrderings(column),
@@ -10788,6 +11211,11 @@ class $$LocalDispatchItemsTableAnnotationComposer
   });
   GeneratedColumn<String> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get accountScope => $composableBuilder(
+    column: $table.accountScope,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<String> get dispatchId => $composableBuilder(
     column: $table.dispatchId,
@@ -10856,6 +11284,7 @@ class $$LocalDispatchItemsTableTableManager
           updateCompanionCallback:
               ({
                 Value<String> id = const Value.absent(),
+                Value<String> accountScope = const Value.absent(),
                 Value<String> dispatchId = const Value.absent(),
                 Value<String> productionTransactionId = const Value.absent(),
                 Value<String> barcodeValue = const Value.absent(),
@@ -10864,6 +11293,7 @@ class $$LocalDispatchItemsTableTableManager
                 Value<int> rowid = const Value.absent(),
               }) => LocalDispatchItemsCompanion(
                 id: id,
+                accountScope: accountScope,
                 dispatchId: dispatchId,
                 productionTransactionId: productionTransactionId,
                 barcodeValue: barcodeValue,
@@ -10874,6 +11304,7 @@ class $$LocalDispatchItemsTableTableManager
           createCompanionCallback:
               ({
                 required String id,
+                Value<String> accountScope = const Value.absent(),
                 required String dispatchId,
                 required String productionTransactionId,
                 required String barcodeValue,
@@ -10882,6 +11313,7 @@ class $$LocalDispatchItemsTableTableManager
                 Value<int> rowid = const Value.absent(),
               }) => LocalDispatchItemsCompanion.insert(
                 id: id,
+                accountScope: accountScope,
                 dispatchId: dispatchId,
                 productionTransactionId: productionTransactionId,
                 barcodeValue: barcodeValue,

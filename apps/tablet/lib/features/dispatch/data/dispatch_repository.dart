@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:drift/drift.dart';
 
 import '../../../core/api/api_client.dart';
+import '../../../core/api/api_session.dart';
 import '../../../core/database/local_database.dart';
 
 class CustomerRepository {
@@ -75,6 +76,7 @@ class DispatchRepository {
     final response = await client.get('/sync/dispatches', query: {'limit': 50});
     final payload = response.data as Map<String, dynamic>;
     final rows = payload['data'] as List<dynamic>? ?? const [];
+    final accountScope = await ApiSession.accountScope();
     await database.transaction(() async {
       for (final raw in rows) {
         if (raw is! Map<String, dynamic>) continue;
@@ -94,6 +96,7 @@ class DispatchRepository {
             .insertOnConflictUpdate(
               LocalDispatchesCompanion.insert(
                 id: id,
+                accountScope: Value(accountScope),
                 dispatchNumber: number,
                 customerId: customerId,
                 customerSnapshotJson: jsonEncode(
@@ -119,16 +122,25 @@ class DispatchRepository {
   Future<LocalProductionTransaction?> findAvailableBarcode(
     String barcode,
   ) async {
+    final accountScope = await ApiSession.accountScope();
     final serverItem = await _findServerBarcode(barcode);
     if (serverItem != null) return serverItem;
 
-    final production = await (database.select(
-      database.localProductionTransactions,
-    )..where((row) => row.barcodeValue.equals(barcode))).getSingleOrNull();
+    final production =
+        await (database.select(database.localProductionTransactions)..where(
+              (row) =>
+                  row.barcodeValue.equals(barcode) &
+                  row.accountScope.equals(accountScope),
+            ))
+            .getSingleOrNull();
     if (production == null) return null;
-    final dispatched = await (database.select(
-      database.localDispatchItems,
-    )..where((row) => row.barcodeValue.equals(barcode))).getSingleOrNull();
+    final dispatched =
+        await (database.select(database.localDispatchItems)..where(
+              (row) =>
+                  row.barcodeValue.equals(barcode) &
+                  row.accountScope.equals(accountScope),
+            ))
+            .getSingleOrNull();
     return dispatched == null ? production : null;
   }
 
@@ -148,6 +160,7 @@ class DispatchRepository {
 
       return LocalProductionTransaction(
         id: data['id']?.toString() ?? 'server_$barcode',
+        accountScope: await ApiSession.accountScope(),
         serialNumber: data['serial_number']?.toString() ?? barcode,
         barcodeValue: data['barcode_value']?.toString() ?? barcode,
         productId: data['product_id']?.toString() ?? '',
@@ -206,6 +219,7 @@ class DispatchRepository {
     required LocalCustomer customer,
     required List<LocalProductionTransaction> items,
   }) async {
+    final accountScope = await ApiSession.accountScope();
     final now = DateTime.now();
     final id = 'disp_${now.microsecondsSinceEpoch}';
     final idempotency = 'idem_$id';
@@ -223,6 +237,7 @@ class DispatchRepository {
           .insert(
             LocalDispatchesCompanion.insert(
               id: id,
+              accountScope: Value(accountScope),
               dispatchNumber: number,
               customerId: customer.id,
               customerSnapshotJson: customer.payloadJson,
@@ -241,6 +256,7 @@ class DispatchRepository {
             .insert(
               LocalDispatchItemsCompanion.insert(
                 id: 'di_${item.id}',
+                accountScope: Value(accountScope),
                 dispatchId: id,
                 productionTransactionId: item.id,
                 barcodeValue: item.barcodeValue,
@@ -253,6 +269,7 @@ class DispatchRepository {
             .insert(
               LocalInventoryLedgerCompanion.insert(
                 id: 'inv_disp_${item.id}',
+                accountScope: Value(accountScope),
                 productId: item.productId,
                 variantId: Value(item.variantId),
                 serialNumber: Value(item.serialNumber),
@@ -272,6 +289,7 @@ class DispatchRepository {
           .insert(
             LocalSyncQueueCompanion.insert(
               id: 'sync_$id',
+              accountScope: Value(accountScope),
               entityType: 'dispatch',
               operation: 'create',
               idempotencyKey: idempotency,
@@ -291,13 +309,19 @@ class DispatchRepository {
     return id;
   }
 
-  Future<LocalDispatche?> findDispatch(String id) {
-    return (database.select(
-      database.localDispatches,
-    )..where((row) => row.id.equals(id))).getSingleOrNull();
+  Future<LocalDispatche?> findDispatch(String id) async {
+    final accountScope = await ApiSession.accountScope();
+    return (database.select(database.localDispatches)..where(
+          (row) => row.id.equals(id) & row.accountScope.equals(accountScope),
+        ))
+        .getSingleOrNull();
   }
 
-  Future<List<LocalDispatche>> history() => (database.select(
-    database.localDispatches,
-  )..orderBy([(row) => OrderingTerm.desc(row.createdAt)])).get();
+  Future<List<LocalDispatche>> history() async {
+    final accountScope = await ApiSession.accountScope();
+    return (database.select(database.localDispatches)
+          ..where((row) => row.accountScope.equals(accountScope))
+          ..orderBy([(row) => OrderingTerm.desc(row.createdAt)]))
+        .get();
+  }
 }
