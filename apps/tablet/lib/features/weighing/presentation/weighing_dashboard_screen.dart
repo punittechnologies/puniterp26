@@ -589,207 +589,231 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
               18 + MediaQuery.of(context).viewInsets.bottom,
             ),
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 560),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Text(
-                    'Connect Label Printer',
-                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    message,
-                    style: const TextStyle(color: Color(0xFF536685)),
-                  ),
-                  const SizedBox(height: 18),
-                  DropdownButtonFormField<PrinterDevice>(
-                    initialValue: printers.contains(selectedPrinter)
-                        ? selectedPrinter
-                        : null,
-                    decoration: const InputDecoration(
-                      labelText: 'Printer connection',
-                      border: OutlineInputBorder(),
+              constraints: BoxConstraints(
+                maxWidth: 560,
+                maxHeight: MediaQuery.sizeOf(context).height * 0.82,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text(
+                      'Connect Label Printer',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
-                    items: printers
-                        .map(
-                          (printer) => DropdownMenuItem(
-                            value: printer,
-                            child: Text(
-                              '${printer.name}  ${printer.address ?? printer.id}',
-                            ),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (printer) =>
-                        sheetSetState(() => selectedPrinter = printer),
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () => bluetoothSettings.open(),
-                          icon: const Icon(Icons.bluetooth_searching_rounded),
-                          label: const Text('Bluetooth Settings'),
-                        ),
+                    const SizedBox(height: 8),
+                    Text(
+                      message,
+                      style: const TextStyle(color: Color(0xFF536685)),
+                    ),
+                    if (AppEdition.webManagedLabels) ...[
+                      const SizedBox(height: 12),
+                      const Text(
+                        'QR printer check',
+                        style: TextStyle(fontWeight: FontWeight.w800),
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: busy ? null : () => refresh(sheetSetState),
-                          icon: const Icon(Icons.refresh_rounded),
-                          label: const Text('Refresh'),
-                        ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Connect the TVS printer below. This button becomes active immediately without closing this panel.',
+                        style: TextStyle(color: Color(0xFF536685)),
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: FilledButton.icon(
-                          onPressed: busy || selectedPrinter == null
-                              ? null
-                              : () async {
-                                  final printer = selectedPrinter!;
-                                  sheetSetState(() {
-                                    busy = true;
-                                    message =
-                                        'Connecting to ${printer.name}...';
+                      const SizedBox(height: 8),
+                      FilledButton.icon(
+                        onPressed:
+                            printerStatus ==
+                                    PrinterConnectionStatus.connected &&
+                                !busy
+                            ? () async {
+                                sheetSetState(() {
+                                  busy = true;
+                                  message =
+                                      'Sending a direct QR test through the selected printer connection...';
+                                });
+                                final result = await printerAdapter.print(
+                                  PrintJob(
+                                    jobId:
+                                        'qr_test_${DateTime.now().microsecondsSinceEpoch}',
+                                    template: const {
+                                      'widthMm': 75,
+                                      'heightMm': 75,
+                                      'elements': [
+                                        {
+                                          'type': 'static_text',
+                                          'bindingKey': 'QR PRINTER TEST',
+                                          'x': 20,
+                                          'y': 6,
+                                          'width': 35,
+                                          'height': 6,
+                                          'style': {
+                                            'fontSize': 10,
+                                            'fontWeight': 'bold',
+                                            'align': 'center',
+                                          },
+                                        },
+                                        {
+                                          'type': 'qr',
+                                          'bindingKey': 'qr.value',
+                                          'x': 20,
+                                          'y': 15,
+                                          'width': 35,
+                                          'height': 35,
+                                        },
+                                        {
+                                          'type': 'static_text',
+                                          'bindingKey': 'erp.puniterp.com',
+                                          'x': 15,
+                                          'y': 55,
+                                          'width': 45,
+                                          'height': 6,
+                                          'style': {
+                                            'fontSize': 8,
+                                            'align': 'center',
+                                          },
+                                        },
+                                      ],
+                                    },
+                                    data: const {
+                                      'qr_value': 'https://erp.puniterp.com',
+                                    },
+                                  ),
+                                );
+                                sheetSetState(() {
+                                  busy = false;
+                                  message =
+                                      'QR TEST RESULT: ${result.message ?? result.status}';
+                                });
+                                if (mounted) {
+                                  setState(() {
+                                    printerStatus = result.status == 'failed'
+                                        ? PrinterConnectionStatus.error
+                                        : PrinterConnectionStatus.connected;
+                                    printerMessage =
+                                        'QR TEST RESULT: ${result.message ?? result.status}';
                                   });
-                                  try {
-                                    await printerAdapter.connect(printer.id);
-                                    await printerAdapter.savePrinter(printer);
-                                    if (!mounted) return;
-                                    setState(() {
-                                      configuredPrinter = printer;
-                                      printerStatus =
-                                          PrinterConnectionStatus.connected;
-                                      printerMessage =
-                                          'Connected to ${printer.name}';
-                                    });
-                                    if (context.mounted) {
-                                      Navigator.of(context).pop();
-                                    }
-                                  } catch (error) {
-                                    sheetSetState(() {
-                                      busy = false;
-                                      message = 'Connection failed: $error';
-                                    });
-                                  }
-                                },
-                          icon: const Icon(Icons.print_outlined),
-                          label: const Text('Connect'),
-                        ),
+                                }
+                              }
+                            : null,
+                        icon: const Icon(Icons.qr_code_2_rounded),
+                        label: const Text('PRINT QR TEST'),
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 10),
-                  OutlinedButton.icon(
-                    onPressed:
-                        printerStatus == PrinterConnectionStatus.connected
-                        ? () async {
-                            sheetSetState(() {
-                              busy = true;
-                              message = 'Sending test print...';
-                            });
-                            final result = await printerAdapter.print(
-                              PrintJob(
-                                jobId:
-                                    'test_${DateTime.now().microsecondsSinceEpoch}',
-                                template: const {},
-                                data: {
-                                  'company_name': 'Punit ERP',
-                                  'product_name': 'Printer Test',
-                                  'serial_number': 'TEST',
-                                  'barcode_value': 'TEST123',
-                                  'gross_weight': 12.480,
-                                  'tare_weight': 0.000,
-                                  'net_weight': 12.480,
-                                  'unit': 'kg',
-                                },
+                    const SizedBox(height: 18),
+                    DropdownButtonFormField<PrinterDevice>(
+                      initialValue: printers.contains(selectedPrinter)
+                          ? selectedPrinter
+                          : null,
+                      decoration: const InputDecoration(
+                        labelText: 'Printer connection',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: printers
+                          .map(
+                            (printer) => DropdownMenuItem(
+                              value: printer,
+                              child: Text(
+                                '${printer.name}  ${printer.address ?? printer.id}',
                               ),
-                            );
-                            sheetSetState(() {
-                              busy = false;
-                              message = result.message ?? result.status;
-                            });
-                            if (mounted) {
-                              setState(() {
-                                printerStatus = result.status == 'failed'
-                                    ? PrinterConnectionStatus.error
-                                    : PrinterConnectionStatus.connected;
-                                printerMessage =
-                                    result.message ?? result.status;
-                              });
-                            }
-                          }
-                        : null,
-                    icon: const Icon(Icons.receipt_long_outlined),
-                    label: const Text('Test Print'),
-                  ),
-                  if (AppEdition.webManagedLabels) ...[
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (printer) =>
+                          sheetSetState(() => selectedPrinter = printer),
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () => bluetoothSettings.open(),
+                            icon: const Icon(Icons.bluetooth_searching_rounded),
+                            label: const Text('Bluetooth Settings'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: busy
+                                ? null
+                                : () => refresh(sheetSetState),
+                            icon: const Icon(Icons.refresh_rounded),
+                            label: const Text('Refresh'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed: busy || selectedPrinter == null
+                                ? null
+                                : () async {
+                                    final printer = selectedPrinter!;
+                                    sheetSetState(() {
+                                      busy = true;
+                                      message =
+                                          'Connecting to ${printer.name}...';
+                                    });
+                                    try {
+                                      await printerAdapter.connect(printer.id);
+                                      await printerAdapter.savePrinter(printer);
+                                      if (!mounted) return;
+                                      setState(() {
+                                        configuredPrinter = printer;
+                                        printerStatus =
+                                            PrinterConnectionStatus.connected;
+                                        printerMessage =
+                                            'Connected to ${printer.name}';
+                                      });
+                                      sheetSetState(() {
+                                        busy = false;
+                                        selectedPrinter = printer;
+                                        message =
+                                            'Connected to ${printer.name}. Tap PRINT QR TEST above.';
+                                      });
+                                    } catch (error) {
+                                      sheetSetState(() {
+                                        busy = false;
+                                        message = 'Connection failed: $error';
+                                      });
+                                    }
+                                  },
+                            icon: const Icon(Icons.print_outlined),
+                            label: const Text('Connect'),
+                          ),
+                        ),
+                      ],
+                    ),
                     const SizedBox(height: 10),
-                    FilledButton.icon(
+                    OutlinedButton.icon(
                       onPressed:
-                          printerStatus == PrinterConnectionStatus.connected &&
-                              !busy
+                          printerStatus == PrinterConnectionStatus.connected
                           ? () async {
                               sheetSetState(() {
                                 busy = true;
-                                message =
-                                    'Sending a direct QR test through the selected printer connection...';
+                                message = 'Sending test print...';
                               });
                               final result = await printerAdapter.print(
                                 PrintJob(
                                   jobId:
-                                      'qr_test_${DateTime.now().microsecondsSinceEpoch}',
-                                  template: const {
-                                    'widthMm': 75,
-                                    'heightMm': 75,
-                                    'elements': [
-                                      {
-                                        'type': 'static_text',
-                                        'bindingKey': 'QR PRINTER TEST',
-                                        'x': 20,
-                                        'y': 6,
-                                        'width': 35,
-                                        'height': 6,
-                                        'style': {
-                                          'fontSize': 10,
-                                          'fontWeight': 'bold',
-                                          'align': 'center',
-                                        },
-                                      },
-                                      {
-                                        'type': 'qr',
-                                        'bindingKey': 'qr.value',
-                                        'x': 20,
-                                        'y': 15,
-                                        'width': 35,
-                                        'height': 35,
-                                      },
-                                      {
-                                        'type': 'static_text',
-                                        'bindingKey': 'erp.puniterp.com',
-                                        'x': 15,
-                                        'y': 55,
-                                        'width': 45,
-                                        'height': 6,
-                                        'style': {
-                                          'fontSize': 8,
-                                          'align': 'center',
-                                        },
-                                      },
-                                    ],
-                                  },
-                                  data: const {
-                                    'qr_value': 'https://erp.puniterp.com',
+                                      'test_${DateTime.now().microsecondsSinceEpoch}',
+                                  template: const {},
+                                  data: {
+                                    'company_name': 'Punit ERP',
+                                    'product_name': 'Printer Test',
+                                    'serial_number': 'TEST',
+                                    'barcode_value': 'TEST123',
+                                    'gross_weight': 12.480,
+                                    'tare_weight': 0.000,
+                                    'net_weight': 12.480,
+                                    'unit': 'kg',
                                   },
                                 ),
                               );
                               sheetSetState(() {
                                 busy = false;
-                                message =
-                                    'QR TEST RESULT: ${result.message ?? result.status}';
+                                message = result.message ?? result.status;
                               });
                               if (mounted) {
                                 setState(() {
@@ -797,16 +821,16 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
                                       ? PrinterConnectionStatus.error
                                       : PrinterConnectionStatus.connected;
                                   printerMessage =
-                                      'QR TEST RESULT: ${result.message ?? result.status}';
+                                      result.message ?? result.status;
                                 });
                               }
                             }
                           : null,
-                      icon: const Icon(Icons.qr_code_2_rounded),
-                      label: const Text('PRINT QR TEST'),
+                      icon: const Icon(Icons.receipt_long_outlined),
+                      label: const Text('Test Print'),
                     ),
                   ],
-                ],
+                ),
               ),
             ),
           );
