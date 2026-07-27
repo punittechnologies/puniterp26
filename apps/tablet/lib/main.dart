@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/api/api_session.dart';
+import 'core/config/app_edition.dart';
 import 'core/database/local_database.dart';
 import 'core/routing/app_router.dart';
 import 'core/theme/app_theme.dart';
@@ -86,7 +87,7 @@ class _PunitTabletAppState extends ConsumerState<PunitTabletApp>
     final router = ref.watch(appRouterProvider);
 
     return MaterialApp.router(
-      title: 'Punit ERP',
+      title: AppEdition.appTitle,
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),
       routerConfig: router,

@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/api/api_session.dart';
+import '../../core/config/app_edition.dart';
 import '../../core/database/local_database.dart';
 import '../dispatch/data/dispatch_repository.dart';
 import '../../services/sync/sync_queue_service.dart';
@@ -129,7 +130,8 @@ class _FoundationScreenState extends State<FoundationScreen> {
         baseUrl: baseUrlController.text,
         email: emailController.text,
         password: passwordController.text,
-        deviceName: 'Punit Tablet ${await ApiSession.deviceId()}',
+        deviceName:
+            '${AppEdition.deviceNamePrefix} ${await ApiSession.deviceId()}',
       );
       final currentAccount = await ApiSession.email();
       if (previousAccount != null &&
@@ -369,7 +371,7 @@ class _Header extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Punit ERP',
+                      AppEdition.appTitle,
                       style: Theme.of(context).textTheme.headlineMedium
                           ?.copyWith(
                             color: const Color(0xFF0B63CE),
@@ -378,8 +380,10 @@ class _Header extends StatelessWidget {
                           ),
                     ),
                     const SizedBox(height: 6),
-                    const Text(
-                      'Production weighing, offline inventory, dispatch and real Bluetooth scale operation.',
+                    Text(
+                      AppEdition.webManagedLabels
+                          ? 'Production weighing and printing with the default label managed in the web panel.'
+                          : 'Production weighing, offline inventory, dispatch and real Bluetooth scale operation.',
                     ),
                   ],
                 ),

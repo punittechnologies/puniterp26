@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../api/api_session.dart';
+import '../config/app_edition.dart';
 import '../../features/foundation/foundation_screen.dart';
 import '../../features/dispatch/presentation/dispatch_screen.dart';
 import '../../features/inventory/presentation/inventory_screen.dart';
@@ -43,12 +44,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           return const ProductPreviewScreen();
         },
       ),
-      GoRoute(
-        path: '/labels',
-        builder: (BuildContext context, GoRouterState state) {
-          return const LabelPreviewScreen();
-        },
-      ),
+      if (!AppEdition.webManagedLabels)
+        GoRoute(
+          path: '/labels',
+          builder: (BuildContext context, GoRouterState state) {
+            return const LabelPreviewScreen();
+          },
+        ),
       GoRoute(
         path: '/inventory',
         builder: (BuildContext context, GoRouterState state) {

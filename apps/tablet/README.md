@@ -1,17 +1,39 @@
-# punit_tablet
+# Punit ERP Android app
 
-A new Flutter project.
+The Android project has two installable editions:
 
-## Getting Started
+- `classic`: the existing Punit ERP application, including app-managed labels.
+- `webLabel`: a separate application that prints only the active web template
+  marked **Make default**. It does not expose the app label designer.
 
-This project is a starting point for a Flutter application.
+The Web Label package ID is
+`com.punittechnologies.puniterp.weblabel`, so it can coexist with the classic
+application.
 
-A few resources to get you started if this is your first Flutter project:
+## Validation
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+```sh
+flutter analyze
+flutter test
+flutter test --dart-define=PUNIT_WEB_LABEL_EDITION=true
+flutter build apk --debug --flavor classic
+```
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Signed Web Label release
+
+The release signing key and password must stay outside the repository. Supply
+them only through the build environment:
+
+```sh
+PUNIT_WEBLABEL_STORE_FILE=/secure/path/punit-weblabel-release.jks \
+PUNIT_WEBLABEL_STORE_PASSWORD='...' \
+PUNIT_WEBLABEL_KEY_ALIAS=punit-weblabel \
+PUNIT_WEBLABEL_KEY_PASSWORD='...' \
+flutter build apk \
+  --release \
+  --flavor webLabel \
+  --dart-define=PUNIT_WEB_LABEL_EDITION=true
+```
+
+Back up the release keystore securely. Future APK updates for the Web Label
+package must be signed by the same key.

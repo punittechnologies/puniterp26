@@ -4,6 +4,11 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val webLabelStoreFile = System.getenv("PUNIT_WEBLABEL_STORE_FILE")
+val webLabelStorePassword = System.getenv("PUNIT_WEBLABEL_STORE_PASSWORD")
+val webLabelKeyAlias = System.getenv("PUNIT_WEBLABEL_KEY_ALIAS")
+val webLabelKeyPassword = System.getenv("PUNIT_WEBLABEL_KEY_PASSWORD")
+
 android {
     namespace = "com.example.punit_tablet"
     compileSdk = 36
@@ -23,13 +28,38 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["appLabel"] = "Punit ERP"
+    }
+
+    signingConfigs {
+        create("webLabelRelease") {
+            storeFile = webLabelStoreFile?.let(::file)
+            storePassword = webLabelStorePassword
+            keyAlias = webLabelKeyAlias
+            keyPassword = webLabelKeyPassword
+        }
+    }
+
+    flavorDimensions += "edition"
+    productFlavors {
+        create("classic") {
+            dimension = "edition"
+            applicationId = "com.example.punit_tablet"
+            manifestPlaceholders["appLabel"] = "Punit ERP"
+            signingConfig = signingConfigs.getByName("debug")
+        }
+        create("webLabel") {
+            dimension = "edition"
+            applicationId = "com.punittechnologies.puniterp.weblabel"
+            manifestPlaceholders["appLabel"] = "Punit ERP Web Label"
+            signingConfig = signingConfigs.getByName("webLabelRelease")
+        }
     }
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }

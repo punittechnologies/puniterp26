@@ -36,7 +36,10 @@ void main() {
   test('stores templates and resolves offline effective fallback', () async {
     SharedPreferences.setMockInitialValues({});
     final database = LocalDatabase.memory();
-    final repository = LabelTemplateRepository(database: database);
+    final repository = LabelTemplateRepository(
+      database: database,
+      webManagedOnly: false,
+    );
     await repository.activatePayload({
       'configurationVersion': 2,
       'templates': [
@@ -69,7 +72,10 @@ void main() {
   test('server app default template is selected after sync', () async {
     SharedPreferences.setMockInitialValues({'api_email': 'operator1'});
     final database = LocalDatabase.memory();
-    final repository = LabelTemplateRepository(database: database);
+    final repository = LabelTemplateRepository(
+      database: database,
+      webManagedOnly: false,
+    );
     await repository.activatePayload({
       'configurationVersion': 5,
       'appDefaultTemplateId': 'app-label',
@@ -104,6 +110,86 @@ void main() {
   });
 
   test(
+    'web label edition selects only the web template marked default',
+    () async {
+      SharedPreferences.setMockInitialValues({'api_email': 'operator1'});
+      final database = LocalDatabase.memory();
+      final repository = LabelTemplateRepository(
+        database: database,
+        webManagedOnly: true,
+      );
+      await repository.activatePayload({
+        'configurationVersion': 8,
+        'appDefaultTemplateId': 'app-label',
+        'templates': [
+          {
+            'id': 'app-label',
+            'name': 'App Designed Label',
+            'code': 'APP-LABEL-operator1',
+            'scope': 'tenant',
+            'isDefault': true,
+            'activeVersion': 99,
+            'templateJson': {'widthMm': 50, 'heightMm': 50, 'elements': []},
+          },
+          {
+            'id': 'older-web-label',
+            'name': 'Older Web Default',
+            'code': 'PACKING-OLD',
+            'scope': 'tenant',
+            'isDefault': true,
+            'activeVersion': 20,
+            'updatedAt': '2026-07-20T10:00:00Z',
+            'templateJson': {'widthMm': 100, 'heightMm': 100, 'elements': []},
+          },
+          {
+            'id': 'web-label',
+            'name': 'Web Default Label',
+            'code': 'PACKING-75',
+            'scope': 'tenant',
+            'isDefault': true,
+            'activeVersion': 3,
+            'updatedAt': '2026-07-27T10:00:00Z',
+            'templateJson': {'widthMm': 75, 'heightMm': 75, 'elements': []},
+          },
+        ],
+      });
+
+      expect(await repository.selectedTemplateId(), 'web-label');
+      expect((await repository.effective())?.name, 'Web Default Label');
+    },
+  );
+
+  test('web label edition clears selection when web has no default', () async {
+    SharedPreferences.setMockInitialValues({
+      'api_email': 'operator1',
+      'label.selected_template_id.operator1': 'old-web-label',
+    });
+    final database = LocalDatabase.memory();
+    final repository = LabelTemplateRepository(
+      database: database,
+      webManagedOnly: true,
+    );
+    await repository.activatePayload({
+      'configurationVersion': 9,
+      'appDefaultTemplateId': 'app-label',
+      'templates': [
+        {
+          'id': 'app-label',
+          'name': 'App Designed Label',
+          'code': 'APP-LABEL-operator1',
+          'scope': 'tenant',
+          'isDefault': true,
+          'activeVersion': 9,
+          'templateJson': {'widthMm': 75, 'heightMm': 75, 'elements': []},
+        },
+      ],
+    });
+
+    expect(await repository.selectedTemplateId(), isNull);
+    expect(await repository.effective(), isNull);
+  });
+
+  test(
     'clearing all account label state removes stale cached templates',
     () async {
       SharedPreferences.setMockInitialValues({
@@ -111,7 +197,10 @@ void main() {
         'label.selected_template_id.operator1': 'old-template',
       });
       final database = LocalDatabase.memory();
-      final repository = LabelTemplateRepository(database: database);
+      final repository = LabelTemplateRepository(
+        database: database,
+        webManagedOnly: false,
+      );
       await repository.activatePayload({
         'configurationVersion': 5,
         'appDefaultTemplateId': 'old-template',

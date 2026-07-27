@@ -5,17 +5,23 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/api/api_client.dart';
 import '../../../core/api/api_session.dart';
+import '../../../core/config/app_edition.dart';
 import '../../../core/database/local_database.dart';
 import '../domain/label_template_models.dart';
 
 class LabelTemplateRepository {
-  const LabelTemplateRepository({required this.database, this.apiClient});
+  const LabelTemplateRepository({
+    required this.database,
+    this.apiClient,
+    this.webManagedOnly = AppEdition.webManagedLabels,
+  });
 
   static const _selectedTemplatePrefix = 'label.selected_template_id';
   static const _legacySelectedTemplateKey = 'label.selected_template_id';
 
   final LocalDatabase database;
   final ApiClient? apiClient;
+  final bool webManagedOnly;
 
   Future<List<LabelTemplateConfig>> cachedTemplates() async {
     final localId = await _localTemplateId();
@@ -70,6 +76,10 @@ class LabelTemplateRepository {
       return null;
     }
 
+    if (webManagedOnly) {
+      return find((template) => template.id == selectedId);
+    }
+
     final serverResolved =
         find(
           (template) =>
@@ -103,7 +113,9 @@ class LabelTemplateRepository {
       final templates = rawTemplates is Map<String, dynamic>
           ? rawTemplates['data'] as List<dynamic>? ?? const []
           : rawTemplates as List<dynamic>? ?? const [];
-      final appDefaultTemplateId = payload['appDefaultTemplateId']?.toString();
+      final appDefaultTemplateId = webManagedOnly
+          ? _webDefaultTemplateId(templates)
+          : payload['appDefaultTemplateId']?.toString();
       final hasCloudAppDefault =
           appDefaultTemplateId != null && appDefaultTemplateId.isNotEmpty;
 
@@ -127,7 +139,7 @@ class LabelTemplateRepository {
               ),
             );
       }
-      if (!hasCloudAppDefault) {
+      if (!hasCloudAppDefault && !webManagedOnly) {
         for (final template in localTemplates) {
           await database
               .into(database.localLabelTemplates)
@@ -189,6 +201,11 @@ class LabelTemplateRepository {
     required String name,
     required Map<String, dynamic> templateJson,
   }) async {
+    if (webManagedOnly) {
+      throw StateError(
+        'Label templates for this edition are managed in the web panel.',
+      );
+    }
     final now = DateTime.now().millisecondsSinceEpoch;
     final localId = await _localTemplateId();
     final accountScope = await _accountScope();
@@ -338,4 +355,32 @@ class LabelTemplateRepository {
       _ => fallback,
     };
   }
+
+  String? _webDefaultTemplateId(List<dynamic> templates) {
+    final candidates =
+        templates.whereType<Map<String, dynamic>>().where((template) {
+          final code = template['code']?.toString() ?? '';
+          final scope = template['scope']?.toString() ?? '';
+          return !code.startsWith('APP-LABEL-') &&
+              _asBool(template['isDefault']) &&
+              (scope == 'tenant' || scope == 'system');
+        }).toList()..sort((left, right) {
+          final leftScope = left['scope'] == 'tenant' ? 0 : 1;
+          final rightScope = right['scope'] == 'tenant' ? 0 : 1;
+          final scopeOrder = leftScope.compareTo(rightScope);
+          if (scopeOrder != 0) return scopeOrder;
+          final updatedOrder = _updatedAtMillis(
+            right['updatedAt'],
+          ).compareTo(_updatedAtMillis(left['updatedAt']));
+          if (updatedOrder != 0) return updatedOrder;
+          return _asInt(
+            right['activeVersion'],
+          ).compareTo(_asInt(left['activeVersion']));
+        });
+
+    return candidates.firstOrNull?['id']?.toString();
+  }
+
+  int _updatedAtMillis(Object? value) =>
+      DateTime.tryParse(value?.toString() ?? '')?.millisecondsSinceEpoch ?? 0;
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:punit_tablet/core/config/app_edition.dart';
 import 'package:punit_tablet/main.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -12,7 +13,7 @@ void main() {
     await tester.pumpWidget(const ProviderScope(child: PunitTabletApp()));
     await tester.pumpAndSettle();
 
-    expect(find.text('Punit ERP'), findsOneWidget);
+    expect(find.text(AppEdition.appTitle), findsOneWidget);
     expect(find.text('Punit ERP App Login'), findsOneWidget);
     expect(find.text('Login & Auto-Sync'), findsOneWidget);
   });
@@ -24,7 +25,7 @@ void main() {
     await tester.pumpWidget(const ProviderScope(child: PunitTabletApp()));
     await tester.pumpAndSettle();
 
-    expect(find.text('Punit ERP'), findsOneWidget);
+    expect(find.text(AppEdition.appTitle), findsOneWidget);
     expect(find.text('Login & Auto-Sync'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

@@ -10,6 +10,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/api/api_session.dart';
+import '../../../core/config/app_edition.dart';
 import '../../../core/database/local_database.dart';
 import '../../../services/devices/android_bluetooth_settings.dart';
 import '../../../services/devices/bluetooth_thermal_printer_adapter.dart';
@@ -818,6 +819,16 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
         preferServerTemplates: true,
       );
       labelTemplate = activeTemplate;
+      if (AppEdition.webManagedLabels && activeTemplate == null) {
+        if (!mounted) return;
+        setState(() {
+          printerStatus = PrinterConnectionStatus.error;
+          printerMessage =
+              'No web label is marked default. Set a default template in the web panel and sync again.';
+        });
+        _showCornerMessage(printerMessage, error: true);
+        return;
+      }
       final result = await printerAdapter.print(
         PrintJob(
           jobId: 'print_${DateTime.now().microsecondsSinceEpoch}',
