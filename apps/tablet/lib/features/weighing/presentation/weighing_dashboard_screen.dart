@@ -726,6 +726,86 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
                     icon: const Icon(Icons.receipt_long_outlined),
                     label: const Text('Test Print'),
                   ),
+                  if (AppEdition.webManagedLabels) ...[
+                    const SizedBox(height: 10),
+                    FilledButton.icon(
+                      onPressed:
+                          printerStatus == PrinterConnectionStatus.connected &&
+                              !busy
+                          ? () async {
+                              sheetSetState(() {
+                                busy = true;
+                                message =
+                                    'Sending a direct QR test through the selected printer connection...';
+                              });
+                              final result = await printerAdapter.print(
+                                PrintJob(
+                                  jobId:
+                                      'qr_test_${DateTime.now().microsecondsSinceEpoch}',
+                                  template: const {
+                                    'widthMm': 75,
+                                    'heightMm': 75,
+                                    'elements': [
+                                      {
+                                        'type': 'static_text',
+                                        'bindingKey': 'QR PRINTER TEST',
+                                        'x': 20,
+                                        'y': 6,
+                                        'width': 35,
+                                        'height': 6,
+                                        'style': {
+                                          'fontSize': 10,
+                                          'fontWeight': 'bold',
+                                          'align': 'center',
+                                        },
+                                      },
+                                      {
+                                        'type': 'qr',
+                                        'bindingKey': 'qr.value',
+                                        'x': 20,
+                                        'y': 15,
+                                        'width': 35,
+                                        'height': 35,
+                                      },
+                                      {
+                                        'type': 'static_text',
+                                        'bindingKey': 'erp.puniterp.com',
+                                        'x': 15,
+                                        'y': 55,
+                                        'width': 45,
+                                        'height': 6,
+                                        'style': {
+                                          'fontSize': 8,
+                                          'align': 'center',
+                                        },
+                                      },
+                                    ],
+                                  },
+                                  data: const {
+                                    'qr_value': 'https://erp.puniterp.com',
+                                  },
+                                ),
+                              );
+                              sheetSetState(() {
+                                busy = false;
+                                message =
+                                    'QR TEST RESULT: ${result.message ?? result.status}';
+                              });
+                              if (mounted) {
+                                setState(() {
+                                  printerStatus = result.status == 'failed'
+                                      ? PrinterConnectionStatus.error
+                                      : PrinterConnectionStatus.connected;
+                                  printerMessage =
+                                      'QR TEST RESULT: ${result.message ?? result.status}';
+                                });
+                              }
+                            }
+                          : null,
+                      icon: const Icon(Icons.qr_code_2_rounded),
+                      label: const Text('PRINT QR TEST'),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -779,7 +859,17 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
   }) async {
     final product = selectedProduct;
     final computed = computation;
-    if (product == null || computed == null) return null;
+    if (product == null) {
+      _showCornerMessage('Print stopped: select a product first.', error: true);
+      return null;
+    }
+    if (computed == null) {
+      _showCornerMessage(
+        'Print stopped: waiting for a live scale reading. Confirm the scale is connected.',
+        error: true,
+      );
+      return null;
+    }
     if (reading.grossWeight < 0 || computed.gross <= 0 || computed.net <= 0) {
       _showCornerMessage(
         'Negative or zero weight cannot be saved. Remove item, zero scale, then weigh again.',
