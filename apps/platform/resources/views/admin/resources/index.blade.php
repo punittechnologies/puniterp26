@@ -1,6 +1,28 @@
 @extends('layouts.admin')
 
 @section('content')
+    @if ($section === 'roles')
+        <div class="card">
+            <div class="card-head">
+                <div>
+                    <h2>Create Role</h2>
+                    <p>Create a tenant-specific role. Reserved system and operator roles stay hidden from this list.</p>
+                </div>
+            </div>
+            <form method="POST" action="{{ route('admin.roles.store') }}" class="form-grid">
+                @csrf
+                <label>
+                    <span>Role name</span>
+                    <input name="name" value="{{ old('name') }}" placeholder="Example: Packing Operator" required>
+                </label>
+                <label>
+                    <span>&nbsp;</span>
+                    <button class="btn primary">Create Role</button>
+                </label>
+            </form>
+        </div>
+    @endif
+
     <div class="card">
         <div class="card-head">
             <h2>{{ $title }}</h2>

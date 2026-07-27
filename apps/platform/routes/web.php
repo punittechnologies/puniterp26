@@ -144,6 +144,7 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/production/{production}', [AdminPanelController::class, 'productionShow'])->name('admin.production.show');
     Route::post('/production/{production}/cancel', [AdminPanelController::class, 'productionCancel'])->name('admin.production.cancel');
     Route::get('/inventory', [AdminPanelController::class, 'inventory'])->name('admin.inventory');
+    Route::get('/inventory/closing-stock/export', [AdminPanelController::class, 'closingStockExport'])->name('admin.inventory.closing-stock.export');
     Route::post('/inventory/adjust', [AdminPanelController::class, 'inventoryAdjust'])->name('admin.inventory.adjust');
     Route::delete('/inventory/clear', [AdminPanelController::class, 'inventoryClear'])->name('admin.inventory.clear');
     Route::get('/customers', [AdminPanelController::class, 'customers'])->name('admin.customers');
@@ -157,6 +158,12 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/dispatch-report', [AdminPanelController::class, 'dispatchReport'])->name('admin.dispatch-report');
     Route::get('/reports/{report?}', [AdminPanelController::class, 'reports'])->name('admin.reports');
     Route::get('/exports/{report}/{format}', [AdminPanelController::class, 'export'])->name('admin.exports');
+    Route::get('/import', [AdminPanelController::class, 'imports'])->name('admin.imports');
+    Route::get('/import/template/{type}', [AdminPanelController::class, 'importTemplate'])->name('admin.imports.template');
+    Route::post('/import/products', [AdminPanelController::class, 'importProducts'])->name('admin.imports.products');
+    Route::post('/import/product-details', [AdminPanelController::class, 'importProductDetails'])->name('admin.imports.product-details');
+    Route::delete('/import/preview/{type}', [AdminPanelController::class, 'clearImportPreview'])->name('admin.imports.preview.clear');
+    Route::get('/export', [AdminPanelController::class, 'exportCenter'])->name('admin.export-center');
     Route::get('/inward/{session}/export/{format}', [AdminPanelController::class, 'inwardExport'])->name('admin.inward.export');
     Route::get('/dispatch/{dispatch}/export/{format}', [AdminPanelController::class, 'dispatchExport'])->name('admin.dispatch.export');
     Route::get('/sync-status', [AdminPanelController::class, 'sync'])->name('admin.sync');
@@ -175,6 +182,7 @@ Route::middleware('auth')->group(function (): void {
     Route::patch('/app-users/{user}/status', [AdminPanelController::class, 'appUserStatus'])->name('admin.app-users.status');
     Route::delete('/app-users/{user}', [AdminPanelController::class, 'userDestroy'])->name('admin.app-users.destroy');
     Route::delete('/admin/users/{user}', [AdminPanelController::class, 'userDestroy'])->name('admin.users.destroy');
+    Route::post('/admin/roles', [AdminPanelController::class, 'roleStore'])->name('admin.roles.store');
     Route::get('/superadmin/onboarding', [AdminPanelController::class, 'superAdminOnboarding'])->name('admin.superadmin.onboarding');
     Route::post('/superadmin/onboarding', [AdminPanelController::class, 'superAdminOnboardingSave'])->name('admin.superadmin.onboarding.save');
     Route::get('/admin/{section}', [AdminPanelController::class, 'resource'])->name('admin.resource');

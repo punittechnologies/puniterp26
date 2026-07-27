@@ -10,6 +10,74 @@
     <section class="card">
         <div class="card-head">
             <div>
+                <h2>Inventory Filters</h2>
+                <p>Filter current stock and ledger movements without changing any inventory data.</p>
+            </div>
+            <a class="btn" href="{{ route('admin.inventory') }}">Clear Filters</a>
+        </div>
+        <form method="GET" action="{{ route('admin.inventory') }}" class="filter-bar">
+            <label>Product
+                <select name="product_id">
+                    <option value="">All products</option>
+                    @foreach($products as $product)
+                        <option value="{{ $product->id }}" @selected($filters['product_id'] === $product->id)>{{ $product->name }}</option>
+                    @endforeach
+                </select>
+            </label>
+            <label>Product detail
+                <select name="variant_id">
+                    <option value="">All product details</option>
+                    @foreach($variants as $variant)
+                        <option value="{{ $variant->id }}" @selected($filters['variant_id'] === $variant->id)>{{ $variant->name }}</option>
+                    @endforeach
+                </select>
+            </label>
+            <label>Movement type
+                <select name="transaction_type">
+                    <option value="">All movement types</option>
+                    @foreach($transactionTypes as $type)
+                        <option value="{{ $type }}" @selected($filters['transaction_type'] === $type)>{{ str($type)->replace('_', ' ')->title() }}</option>
+                    @endforeach
+                </select>
+            </label>
+            <label>Serial or barcode
+                <input name="search" value="{{ $filters['search'] }}" placeholder="Search serial or barcode">
+            </label>
+            <label>From date
+                <input type="date" name="from" value="{{ $filters['from'] }}">
+            </label>
+            <label>To date
+                <input type="date" name="to" value="{{ $filters['to'] }}">
+            </label>
+            <button class="btn primary">Apply Filters</button>
+        </form>
+    </section>
+
+    <section class="card">
+        <div class="card-head">
+            <div>
+                <h2>Closing Stock</h2>
+                <p>Download the stock position up to a selected date. Product filters above are respected.</p>
+            </div>
+        </div>
+        <form method="GET" action="{{ route('admin.inventory.closing-stock.export') }}" class="filter-bar">
+            <label>Closing date
+                <input type="date" name="stock_date" value="{{ now()->toDateString() }}" required>
+            </label>
+            @if($filters['product_id'])
+                <input type="hidden" name="product_id" value="{{ $filters['product_id'] }}">
+            @endif
+            @if($filters['variant_id'])
+                <input type="hidden" name="variant_id" value="{{ $filters['variant_id'] }}">
+            @endif
+            <button class="btn primary" name="format" value="xlsx">Download Excel</button>
+            <button class="btn" name="format" value="pdf">Download PDF</button>
+        </form>
+    </section>
+
+    <section class="card">
+        <div class="card-head">
+            <div>
                 <h2>Product-wise Inventory</h2>
                 <p>Bird’s-eye stock position by product and product detail fields.</p>
             </div>
@@ -55,6 +123,7 @@
             <form method="POST" action="{{ route('admin.inventory.adjust') }}" class="form-grid">
                 @csrf
                 <label>Product<select name="product_id" required>@foreach($products as $product)<option value="{{ $product->id }}">{{ $product->name }}</option>@endforeach</select></label>
+                <label>Product detail<select name="variant_id"><option value="">Base product</option>@foreach($variants as $variant)<option value="{{ $variant->id }}">{{ $variant->name }}</option>@endforeach</select></label>
                 <label>Type<select name="transaction_type"><option value="manual_adjustment">Manual adjustment</option><option value="opening_stock">Opening stock</option></select></label>
                 <label>Weight<input name="weight_quantity" type="number" step="0.001" required></label>
                 <label>Pieces<input name="piece_quantity" type="number" step="1"></label>
@@ -83,22 +152,26 @@
 
     <section class="grid two">
         <div class="card">
-            <div class="card-head"><h2>Product-wise Inventory</h2></div>
+            <div class="card-head"><h2>Filtered Product-wise Inventory</h2></div>
             <div class="table-wrap"><table class="data-table"><thead><tr><th>Product</th><th>Variant</th><th>Weight</th><th>PCS</th><th>Last movement</th></tr></thead><tbody>
-                @foreach($summary as $row)
+                @forelse($summary as $row)
                     <tr><td>{{ $productNames[$row->product_id] ?? $row->product_id }}</td><td>{{ $variantNames[$row->variant_id] ?? '-' }}</td><td>{{ number_format((float)$row->weight, 3) }}</td><td>{{ number_format((float)$row->pieces, 0) }}</td><td>{{ $row->last_movement }}</td></tr>
-                @endforeach
+                @empty
+                    <tr><td colspan="5" class="empty">No inventory matches these filters.</td></tr>
+                @endforelse
             </tbody></table></div>
             {{ $summary->links() }}
         </div>
     </section>
 
     <div class="card">
-        <div class="card-head"><h2>Inventory Ledger</h2><a class="btn" href="{{ route('admin.exports', ['inventory-ledger', 'csv']) }}">Export CSV</a></div>
+        <div class="card-head"><h2>Filtered Inventory Ledger</h2><a class="btn" href="{{ route('admin.exports', array_merge(['report' => 'inventory-ledger', 'format' => 'csv'], request()->query())) }}">Export CSV</a></div>
         <div class="table-wrap"><table class="data-table"><thead><tr><th>Type</th><th>Product</th><th>Barcode</th><th>Weight</th><th>PCS</th><th>Reference</th><th>Date</th></tr></thead><tbody>
-            @foreach($ledger as $row)
+            @forelse($ledger as $row)
                 <tr><td>{{ $row->transaction_type }}</td><td>{{ $productNames[$row->product_id] ?? $row->product_id }}</td><td>{{ $row->barcode_value ?? '-' }}</td><td>{{ $row->weight_quantity }}</td><td>{{ $row->piece_quantity ?? '-' }}</td><td>{{ $row->reference_type }}</td><td>{{ $row->occurred_at?->format('d M Y H:i') }}</td></tr>
-            @endforeach
+            @empty
+                <tr><td colspan="7" class="empty">No ledger movements match these filters.</td></tr>
+            @endforelse
         </tbody></table></div>
         {{ $ledger->links() }}
     </div>

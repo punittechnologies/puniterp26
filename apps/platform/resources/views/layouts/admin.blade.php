@@ -27,6 +27,8 @@
             ['App Users', route('admin.app-users'), 'users.manage'],
             ['Users', route('admin.resource', 'users'), 'users.manage'],
             ['Roles', route('admin.resource', 'roles'), 'roles.manage'],
+            ['Import', route('admin.imports'), 'products.view'],
+            ['Export', route('admin.export-center'), 'reports.view'],
             ['Report Customiser', route('admin.tenant-settings'), 'configuration.manage'],
             ['QR Page Design', route('admin.qr-page.edit'), 'configuration.manage'],
             ['QR Complaint Inbox', route('admin.qr-complaints.index'), 'configuration.manage'],

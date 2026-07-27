@@ -13,6 +13,14 @@
             <form method="POST" action="{{ route('admin.app-users.store') }}" class="form-grid">
                 @csrf
                 <label>
+                    Login type
+                    <select name="access_type" required>
+                        <option value="app" @selected(old('access_type', 'app') === 'app')>App only</option>
+                        <option value="web" @selected(old('access_type') === 'web')>Web panel</option>
+                    </select>
+                    <small>App only works in the Punit ERP app. Web panel can login at the website.</small>
+                </label>
+                <label>
                     Operator name
                     <input name="name" value="{{ old('name') }}" placeholder="Example: Dispatch Operator 1" required>
                 </label>
@@ -33,17 +41,34 @@
                     Confirm password
                     <input type="password" name="password_confirmation" required>
                 </label>
-                <label>
-                    App role/access
-                    <select name="role_ids[]" multiple required>
-                        @foreach ($roles as $role)
-                            <option value="{{ $role->id }}" @selected(collect(old('role_ids', []))->contains($role->id))>
-                                {{ $role->name }}
-                            </option>
+                <div class="access-picker full">
+                    @php
+                        $accessIcons = [
+                            'products' => 'P',
+                            'production' => 'IN',
+                            'dispatch' => 'D',
+                            'customers' => 'C',
+                            'inventory' => 'I',
+                            'reports' => 'R',
+                            'users_roles' => 'U',
+                            'settings' => 'S',
+                        ];
+                        $appOnlyModules = ['production', 'dispatch'];
+                    @endphp
+                    <div>
+                        <strong>Access allowed</strong>
+                        <small>Select only the operations this user can use.</small>
+                    </div>
+                    <div class="choice-stack">
+                        @foreach ($accessOptions as $key => $option)
+                            <label class="choice-row" data-access-module="{{ $key }}" data-app-only="{{ in_array($key, $appOnlyModules, true) ? 'true' : 'false' }}">
+                                <input type="checkbox" name="access_modules[]" value="{{ $key }}" @checked(collect(old('access_modules', []))->contains($key))>
+                                <span class="choice-icon">{{ $accessIcons[$key] ?? '-' }}</span>
+                                <span>{{ $option['label'] }}</span>
+                            </label>
                         @endforeach
-                    </select>
-                    <small>Role permissions decide weighing, dispatch, reports and sync access.</small>
-                </label>
+                    </div>
+                </div>
                 <div class="form-actions">
                     <button class="btn primary">Create App User</button>
                 </div>
@@ -70,7 +95,7 @@
         <div class="panel-header">
             <div>
                 <h2>App Users</h2>
-                <p>{{ $users->total() }} app-only logins configured.</p>
+                <p>{{ $users->total() }} app/web logins configured.</p>
             </div>
         </div>
         <div class="table-wrap">
@@ -80,7 +105,8 @@
                         <th>Name</th>
                         <th>App user ID</th>
                         <th>Email</th>
-                        <th>Roles</th>
+                        <th>Type</th>
+                        <th>Access</th>
                         <th>Status</th>
                         <th>Updated</th>
                         <th></th>
@@ -92,7 +118,8 @@
                             <td>{{ $user->name }}</td>
                             <td><strong>{{ $user->app_username }}</strong></td>
                             <td>{{ $user->email }}</td>
-                            <td>{{ $user->roles->pluck('name')->join(', ') ?: '-' }}</td>
+                            <td>{{ $user->app_only ? 'App' : 'Web' }}</td>
+                            <td>{{ $user->roles->flatMap->permissions->pluck('name')->unique()->join(', ') ?: '-' }}</td>
                             <td>
                                 <span class="status-pill {{ $user->is_active ? 'success' : 'muted' }}">
                                     {{ $user->is_active ? 'Active' : 'Inactive' }}
@@ -100,16 +127,21 @@
                             </td>
                             <td>{{ optional($user->updated_at)->format('d M Y H:i') }}</td>
                             <td>
-                                <form method="POST" action="{{ route('admin.app-users.status', $user) }}">
+                                <form method="POST" action="{{ route('admin.app-users.status', $user) }}" class="inline-form">
                                     @csrf
                                     @method('PATCH')
                                     <button class="btn">{{ $user->is_active ? 'Deactivate' : 'Activate' }}</button>
+                                </form>
+                                <form method="POST" action="{{ route('admin.app-users.destroy', $user) }}" class="inline-form" onsubmit="return confirm('Delete this login? Email and app ID can be reused after delete.');">
+                                    @csrf
+                                    @method('DELETE')
+                                    <button class="btn destructive">Delete</button>
                                 </form>
                             </td>
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="7">No app users yet. Create one above for tablet/mobile login.</td>
+                            <td colspan="8">No app users yet. Create one above for tablet/mobile login.</td>
                         </tr>
                     @endforelse
                 </tbody>
@@ -117,4 +149,25 @@
         </div>
         {{ $users->links() }}
     </section>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const loginType = document.querySelector('select[name="access_type"]');
+            const rows = Array.from(document.querySelectorAll('[data-access-module]'));
+            const syncAccessRows = () => {
+                const isApp = loginType?.value === 'app';
+                rows.forEach((row) => {
+                    const allowedForApp = row.dataset.appOnly === 'true';
+                    row.classList.toggle('is-hidden', isApp && !allowedForApp);
+                    const checkbox = row.querySelector('input[type="checkbox"]');
+                    if (checkbox && isApp && !allowedForApp) {
+                        checkbox.checked = false;
+                    }
+                });
+            };
+
+            loginType?.addEventListener('change', syncAccessRows);
+            syncAccessRows();
+        });
+    </script>
 @endsection

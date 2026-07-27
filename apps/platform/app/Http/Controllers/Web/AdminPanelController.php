@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Web;
 
 use App\Domain\Operations\Services\OperationsSyncService;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Web\Concerns\AdminDataExchange;
 use App\Models\AuditLog;
 use App\Models\BarcodeRecord;
 use App\Models\Customer;
@@ -39,6 +40,8 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class AdminPanelController extends Controller
 {
+    use AdminDataExchange;
+
     public function dashboard(Request $request): View
     {
         $tenantId = $this->tenantId();
@@ -115,7 +118,13 @@ class AdminPanelController extends Controller
             'device-assignments' => $this->simpleResource($section, ProductDeviceAssignment::query(), ['device_id', 'product_id', 'variant_id', 'allowed', 'locked']),
             'label-templates' => $this->simpleResource($section, LabelTemplate::query(), ['name', 'code', 'scope', 'is_active', 'active_version'], tenantOptional: true),
             'users' => $this->simpleResource($section, User::query(), ['name', 'email', 'is_active', 'updated_at']),
-            'roles' => $this->simpleResource($section, Role::query(), ['name', 'key', 'is_system', 'updated_at']),
+            'roles' => $this->simpleResource(
+                $section,
+                Role::query()
+                    ->where('key', 'not like', 'operator-%')
+                    ->where('key', 'not like', 'access-%'),
+                ['name', 'key', 'updated_at'],
+            ),
             'permissions' => $this->simpleResource($section, Permission::query(), ['name', 'key', 'module'], tenantOptional: true),
             default => abort(404),
         };
@@ -167,7 +176,7 @@ class AdminPanelController extends Controller
                 ->where('tenant_id', $tenantId)
                 ->where(function ($query): void {
                     $query->where('app_only', true)
-                        ->orWhere('app_username', '!=', null);
+                        ->orWhereNotNull('app_username');
                 })
                 ->findOrFail($request->string('edit')->toString());
         }
@@ -177,7 +186,7 @@ class AdminPanelController extends Controller
             'editing' => $editing,
             'users' => User::query()
                 ->where('tenant_id', $tenantId)
-                ->where('app_only', true)
+                ->whereNotNull('app_username')
                 ->with('roles.permissions')
                 ->latest()
                 ->paginate(25),
@@ -185,6 +194,7 @@ class AdminPanelController extends Controller
                 ->where('tenant_id', $tenantId)
                 ->orderBy('name')
                 ->get(),
+            'accessOptions' => $this->operatorAccessOptions(),
         ]);
     }
 
@@ -193,14 +203,23 @@ class AdminPanelController extends Controller
         abort_unless(Auth::user()?->hasPermission('users.manage'), 403);
 
         $tenantId = $this->tenantId();
-        $data = $request->validate([
-            'name' => ['required', 'string', 'max:255'],
-            'app_username' => ['required', 'alpha_dash', 'min:3', 'max:80', Rule::unique('users', 'app_username')],
-            'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')],
-            'password' => ['required', 'confirmed', Password::min(6)],
-            'role_ids' => ['required', 'array', 'min:1'],
-            'role_ids.*' => ['required', Rule::exists('roles', 'id')->where('tenant_id', $tenantId)],
+        $access = $request->validate([
+            'access_type' => ['required', Rule::in(['app', 'web'])],
         ]);
+        $allowedModules = $access['access_type'] === 'app'
+            ? ['production', 'dispatch']
+            : array_keys($this->operatorAccessOptions());
+        $data = [
+            ...$access,
+            ...$request->validate([
+                'name' => ['required', 'string', 'max:255'],
+                'app_username' => ['required', 'alpha_dash', 'min:3', 'max:80', Rule::unique('users', 'app_username')],
+                'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')],
+                'password' => ['required', 'confirmed', Password::min(6)],
+                'access_modules' => ['required', 'array', 'min:1'],
+                'access_modules.*' => ['required', Rule::in($allowedModules)],
+            ]),
+        ];
 
         $user = DB::transaction(function () use ($data, $tenantId): User {
             $user = User::query()->create([
@@ -209,47 +228,38 @@ class AdminPanelController extends Controller
                 'app_username' => strtolower($data['app_username']),
                 'email' => strtolower($data['email']),
                 'password' => Hash::make($data['password']),
-                'app_only' => true,
+                'app_only' => $data['access_type'] === 'app',
                 'is_active' => true,
                 'created_by' => Auth::id(),
                 'updated_by' => Auth::id(),
             ]);
 
-            $roles = Role::query()
-                ->where('tenant_id', $tenantId)
-                ->whereIn('id', $data['role_ids'])
-                ->get();
-            $appPermissions = collect([
-                ['key' => 'app.login', 'name' => 'Login to tablet app', 'module' => 'app'],
-                ['key' => 'products.view', 'name' => 'View products', 'module' => 'products'],
-                ['key' => 'customers.manage', 'name' => 'Manage customers', 'module' => 'customers'],
-                ['key' => 'inventory.view', 'name' => 'View inventory', 'module' => 'inventory'],
-                ['key' => 'production.capture', 'name' => 'Capture production', 'module' => 'production'],
-                ['key' => 'dispatch.confirm', 'name' => 'Confirm dispatch', 'module' => 'dispatch'],
-                ['key' => 'reports.view', 'name' => 'View reports', 'module' => 'reports'],
-            ])->map(fn (array $permission) => Permission::query()->firstOrCreate(
-                ['key' => $permission['key']],
-                $permission,
+            $role = Role::query()->create([
+                'tenant_id' => $tenantId,
+                'name' => $user->name.' '.str($data['access_type'])->upper().' Access',
+                'key' => 'operator-'.$user->id,
+                'is_system' => false,
+                'created_by' => Auth::id(),
+                'updated_by' => Auth::id(),
+            ]);
+            $role->permissions()->sync($this->permissionIdsForOperator(
+                $data['access_type'],
+                $data['access_modules'],
             ));
-
-            foreach ($roles as $role) {
-                $role->permissions()->syncWithoutDetaching($appPermissions->pluck('id')->all());
-            }
-
-            $user->roles()->sync($roles->pluck('id'));
+            $user->roles()->sync([$role->id]);
             $this->audit('app_user.created', $user, [], $user->only(['name', 'email', 'app_username', 'is_active']));
 
             return $user;
         });
 
-        return back()->with('status', "App login created for {$user->app_username}. Use this ID in the Punit ERP app.");
+        return back()->with('status', "Login created for {$user->app_username}.");
     }
 
     public function appUserStatus(User $user): RedirectResponse
     {
         abort_unless(Auth::user()?->hasPermission('users.manage'), 403);
         $this->ensureTenant($user->tenant_id);
-        abort_unless($user->app_only, 404);
+        abort_unless($user->app_username, 404);
 
         $old = $user->toArray();
         $user->update([
@@ -259,6 +269,99 @@ class AdminPanelController extends Controller
         $this->audit('app_user.status_changed', $user, $old, $user->toArray());
 
         return back()->with('status', $user->is_active ? 'App user activated.' : 'App user deactivated.');
+    }
+
+    public function roleStore(Request $request): RedirectResponse
+    {
+        abort_unless(Auth::user()?->hasPermission('roles.manage'), 403);
+
+        $tenantId = $this->tenantId();
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:120'],
+        ]);
+        $name = trim($data['name']);
+        $key = str($name)->slug('-')->toString();
+
+        if ($key === '' || str_starts_with($key, 'operator-') || str_starts_with($key, 'access-')) {
+            return back()->withErrors(['name' => 'Please enter a valid role name.'])->withInput();
+        }
+
+        $existing = Role::withTrashed()
+            ->where('tenant_id', $tenantId)
+            ->where('key', $key)
+            ->first();
+        if ($existing && ! $existing->trashed()) {
+            return back()->withErrors(['name' => 'This role already exists.'])->withInput();
+        }
+
+        $old = $existing?->toArray() ?? [];
+        $role = $existing ?: new Role(['tenant_id' => $tenantId, 'key' => $key]);
+        if ($role->trashed()) {
+            $role->restore();
+        }
+        $role->fill([
+            'tenant_id' => $tenantId,
+            'name' => $name,
+            'key' => $key,
+            'is_system' => false,
+            'created_by' => $role->created_by ?? Auth::id(),
+            'updated_by' => Auth::id(),
+        ])->save();
+
+        $this->audit('role.created', $role, $old, $role->fresh()->toArray());
+
+        return back()->with('status', 'Role created successfully.');
+    }
+
+    private function operatorAccessOptions(): array
+    {
+        return [
+            'products' => ['label' => 'Products / Product Details', 'permissions' => ['products.view']],
+            'production' => ['label' => 'Production Entry / Inward', 'permissions' => ['production.capture', 'products.view']],
+            'dispatch' => ['label' => 'Dispatch', 'permissions' => ['dispatch.confirm', 'customers.manage', 'inventory.view']],
+            'customers' => ['label' => 'Customers', 'permissions' => ['customers.manage']],
+            'inventory' => ['label' => 'Inventory', 'permissions' => ['inventory.view']],
+            'reports' => ['label' => 'Reports / Exports', 'permissions' => ['reports.view']],
+            'users_roles' => ['label' => 'Users & Roles', 'permissions' => ['users.manage', 'roles.manage']],
+            'settings' => ['label' => 'Settings / Report Customiser', 'permissions' => ['configuration.manage', 'configuration.history.view']],
+        ];
+    }
+
+    private function permissionIdsForOperator(string $accessType, array $modules): array
+    {
+        $options = $this->operatorAccessOptions();
+        $permissionDefinitions = collect([
+            ['key' => 'dashboard.view', 'name' => 'View dashboard', 'module' => 'dashboard'],
+            ['key' => 'app.login', 'name' => 'Login to tablet app', 'module' => 'app'],
+            ['key' => 'products.view', 'name' => 'View products', 'module' => 'products'],
+            ['key' => 'customers.manage', 'name' => 'Manage customers', 'module' => 'customers'],
+            ['key' => 'inventory.view', 'name' => 'View inventory', 'module' => 'inventory'],
+            ['key' => 'production.capture', 'name' => 'Capture production', 'module' => 'production'],
+            ['key' => 'dispatch.confirm', 'name' => 'Confirm dispatch', 'module' => 'dispatch'],
+            ['key' => 'reports.view', 'name' => 'View reports', 'module' => 'reports'],
+            ['key' => 'users.manage', 'name' => 'Manage users', 'module' => 'users'],
+            ['key' => 'roles.manage', 'name' => 'Manage roles', 'module' => 'roles'],
+            ['key' => 'configuration.manage', 'name' => 'Manage configuration', 'module' => 'configuration'],
+            ['key' => 'configuration.history.view', 'name' => 'View configuration history', 'module' => 'configuration'],
+        ])->keyBy('key');
+        $keys = collect($modules)
+            ->flatMap(fn (string $module) => $options[$module]['permissions'] ?? [])
+            ->when($accessType === 'app', fn ($keys) => $keys->push('app.login'))
+            ->when($accessType === 'web', fn ($keys) => $keys->push('dashboard.view'))
+            ->unique()
+            ->values();
+
+        return $keys
+            ->map(function (string $key) use ($permissionDefinitions) {
+                $definition = $permissionDefinitions[$key] ?? [
+                    'key' => $key,
+                    'name' => str($key)->replace(['.', '_'], ' ')->title()->toString(),
+                    'module' => str($key)->before('.')->toString(),
+                ];
+
+                return Permission::query()->firstOrCreate(['key' => $key], $definition)->id;
+            })
+            ->all();
     }
 
     public function userDestroy(User $user): RedirectResponse
@@ -420,17 +523,60 @@ class AdminPanelController extends Controller
     public function inventory(Request $request): View
     {
         $tenantId = $this->tenantId();
+        $filters = $request->validate([
+            'product_id' => ['nullable', Rule::exists('products', 'id')->where('tenant_id', $tenantId)],
+            'variant_id' => ['nullable', Rule::exists('product_variants', 'id')->where('tenant_id', $tenantId)],
+            'transaction_type' => ['nullable', 'string', 'max:100'],
+            'search' => ['nullable', 'string', 'max:120'],
+            'from' => ['nullable', 'date'],
+            'to' => ['nullable', 'date', 'after_or_equal:from'],
+        ]);
+        $filters = [
+            'product_id' => $filters['product_id'] ?? '',
+            'variant_id' => $filters['variant_id'] ?? '',
+            'transaction_type' => $filters['transaction_type'] ?? '',
+            'search' => trim($filters['search'] ?? ''),
+            'from' => $filters['from'] ?? '',
+            'to' => $filters['to'] ?? '',
+        ];
+
         $summary = InventoryTransaction::query()
             ->where('tenant_id', $tenantId)
+            ->when($filters['product_id'], fn ($query, $id) => $query->where('product_id', $id))
+            ->when($filters['variant_id'], fn ($query, $id) => $query->where('variant_id', $id))
             ->select('product_id', 'variant_id', DB::raw($this->inventoryWeightExpression().' as weight'), DB::raw($this->inventoryPieceExpression().' as pieces'), DB::raw('max(occurred_at) as last_movement'))
             ->groupBy('product_id', 'variant_id')
             ->orderByDesc('weight')
-            ->paginate(25);
+            ->paginate(25)
+            ->withQueryString();
         $ledger = InventoryTransaction::query()
             ->where('tenant_id', $tenantId)
-            ->when($request->filled('search'), fn ($query) => $query->where('barcode_value', 'like', '%'.$request->search.'%'))
+            ->when($filters['product_id'], fn ($query, $id) => $query->where('product_id', $id))
+            ->when($filters['variant_id'], fn ($query, $id) => $query->where('variant_id', $id))
+            ->when($filters['transaction_type'], fn ($query, $type) => $query->where('transaction_type', $type))
+            ->when($filters['from'], fn ($query, $from) => $query->where('occurred_at', '>=', CarbonImmutable::parse($from)->startOfDay()))
+            ->when($filters['to'], fn ($query, $to) => $query->where('occurred_at', '<=', CarbonImmutable::parse($to)->endOfDay()))
+            ->when($filters['search'], function ($query, string $search) use ($tenantId): void {
+                $like = '%'.$search.'%';
+                $matchingBarcodes = ProductionTransaction::query()
+                    ->select('barcode_value')
+                    ->where('tenant_id', $tenantId)
+                    ->where(fn ($query) => $query
+                        ->where('serial_number', 'like', $like)
+                        ->orWhere('barcode_value', 'like', $like));
+                $query->where(fn ($query) => $query
+                    ->where('barcode_value', 'like', $like)
+                    ->orWhereIn('barcode_value', $matchingBarcodes));
+            })
             ->latest('occurred_at')
-            ->paginate(25, ['*'], 'ledger_page');
+            ->paginate(25, ['*'], 'ledger_page')
+            ->withQueryString();
+
+        $detailCards = $this->inventoryDetailCards(
+            $tenantId,
+            $filters['product_id'] ?: null,
+            $filters['variant_id'] ?: null,
+        );
 
         return view('admin.inventory.index', [
             'title' => 'Inventory',
@@ -438,9 +584,17 @@ class AdminPanelController extends Controller
             'summary' => $summary,
             'ledger' => $ledger,
             'products' => Product::query()->where('tenant_id', $tenantId)->orderBy('name')->get(),
+            'variants' => ProductVariant::query()->where('tenant_id', $tenantId)->orderBy('name')->get(),
             'productNames' => Product::query()->where('tenant_id', $tenantId)->pluck('name', 'id'),
             'variantNames' => ProductVariant::query()->where('tenant_id', $tenantId)->pluck('name', 'id'),
-            'detailCards' => $this->inventoryDetailCards($tenantId),
+            'detailCards' => $detailCards,
+            'transactionTypes' => InventoryTransaction::query()
+                ->where('tenant_id', $tenantId)
+                ->whereNotNull('transaction_type')
+                ->distinct()
+                ->orderBy('transaction_type')
+                ->pluck('transaction_type'),
+            'filters' => $filters,
         ]);
     }
 
@@ -896,9 +1050,20 @@ class AdminPanelController extends Controller
 
     public function export(string $report, string $format, Request $request)
     {
+        abort_unless(Auth::user()?->hasPermission('reports.view'), 403);
+        abort_unless(in_array($report, ['inward', 'dispatch', 'inventory', 'inventory-ledger', 'audit'], true), 404);
+        abort_unless(in_array($format, ['pdf', 'xlsx', 'csv'], true), 404);
+        $request->validate([
+            'from' => ['nullable', 'date'],
+            'to' => ['nullable', 'date', 'after_or_equal:from'],
+            'product_id' => ['nullable', 'string'],
+            'variant_id' => ['nullable', 'string'],
+            'transaction_type' => ['nullable', 'string', 'max:100'],
+            'search' => ['nullable', 'string', 'max:120'],
+        ]);
         $tenantId = $this->tenantId();
         [$from, $to] = $this->dateRange($request, defaultDays: 30);
-        $rows = $this->reportRows($report, $tenantId, $from, $to)->limit(5000)->get();
+        $rows = $this->reportRows($report, $tenantId, $from, $to, $request)->limit(5000)->get();
         $columns = $this->reportColumns($report);
 
         if ($format === 'pdf') {
@@ -909,7 +1074,14 @@ class AdminPanelController extends Controller
         }
 
         if ($format === 'xlsx') {
-            return response()->view('admin.exports.xls', compact('report', 'columns', 'rows'))->header('Content-Type', 'application/vnd.ms-excel')->header('Content-Disposition', 'attachment; filename="'.$report.'-report.xls"');
+            return response($this->xlsxWorkbook($report, [
+                array_map(fn (string $column) => str($column)->replace('_', ' ')->title()->toString(), $columns),
+                ...$rows->map(fn ($row) => array_map(fn ($column) => data_get($row, $column), $columns))->all(),
+            ]), 200, [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'Content-Disposition' => 'attachment; filename="'.$report.'-report.xlsx"',
+                'X-Content-Type-Options' => 'nosniff',
+            ]);
         }
 
         return new StreamedResponse(function () use ($columns, $rows): void {
@@ -1051,7 +1223,24 @@ class AdminPanelController extends Controller
     private function reportRows(string $report, string $tenantId, CarbonImmutable $from, CarbonImmutable $to, ?Request $request = null)
     {
         return match ($report) {
-            'inventory', 'inventory-ledger' => InventoryTransaction::query()->where('tenant_id', $tenantId)->whereBetween('occurred_at', [$from, $to])->latest('occurred_at'),
+            'inventory', 'inventory-ledger' => InventoryTransaction::query()
+                ->where('tenant_id', $tenantId)
+                ->whereBetween('occurred_at', [$from, $to])
+                ->when($request?->filled('product_id'), fn ($query) => $query->where('product_id', $request->string('product_id')->toString()))
+                ->when($request?->filled('variant_id'), fn ($query) => $query->where('variant_id', $request->string('variant_id')->toString()))
+                ->when($request?->filled('transaction_type'), fn ($query) => $query->where('transaction_type', $request->string('transaction_type')->toString()))
+                ->when($request?->filled('search'), function ($query) use ($request, $tenantId): void {
+                    $search = '%'.$request->string('search')->toString().'%';
+                    $query->where(fn ($query) => $query
+                        ->where('barcode_value', 'like', $search)
+                        ->orWhereIn('barcode_value', ProductionTransaction::query()
+                            ->select('barcode_value')
+                            ->where('tenant_id', $tenantId)
+                            ->where(fn ($production) => $production
+                                ->where('serial_number', 'like', $search)
+                                ->orWhere('barcode_value', 'like', $search))));
+                })
+                ->latest('occurred_at'),
             'dispatch', 'customer-dispatch' => Dispatch::query()
                 ->where('tenant_id', $tenantId)
                 ->where(function ($query) use ($from, $to): void {
@@ -1140,15 +1329,20 @@ class AdminPanelController extends Controller
         return "sum(case when transaction_type in ('dispatch_deduction', 'production_cancellation') then -coalesce(piece_quantity, 0) else coalesce(piece_quantity, 0) end)";
     }
 
-    private function inventoryDetailCards(string $tenantId)
-    {
+    private function inventoryDetailCards(
+        string $tenantId,
+        ?string $productId = null,
+        ?string $variantId = null,
+    ) {
         $products = Product::query()->where('tenant_id', $tenantId)->pluck('name', 'id');
         $productions = ProductionTransaction::query()
             ->where('tenant_id', $tenantId)
             ->where('status', 'active')
+            ->when($productId, fn ($query, $id) => $query->where('product_id', $id))
+            ->when($variantId, fn ($query, $id) => $query->where('variant_id', $id))
             ->latest('captured_at')
             ->limit(300)
-            ->get(['product_id', 'dynamic_values', 'net_weight', 'piece_quantity']);
+            ->get(['product_id', 'variant_id', 'dynamic_values', 'net_weight', 'piece_quantity']);
 
         return $productions
             ->map(function (ProductionTransaction $row) use ($products) {
@@ -1164,17 +1358,21 @@ class AdminPanelController extends Controller
                     ->all();
 
                 return [
+                    'product_id' => $row->product_id,
+                    'variant_id' => $row->variant_id,
                     'product' => $products[$row->product_id] ?? 'Product',
                     'details' => $details,
                     'weight' => (float) $row->net_weight,
                     'pieces' => (float) ($row->piece_quantity ?? 0),
                 ];
             })
-            ->groupBy(fn ($row) => $row['product'].'|'.json_encode($row['details']))
+            ->groupBy(fn ($row) => $row['product_id'].'|'.($row['variant_id'] ?? '').'|'.json_encode($row['details']))
             ->map(function ($rows) {
                 $first = $rows->first();
 
                 return [
+                    'product_id' => $first['product_id'],
+                    'variant_id' => $first['variant_id'],
                     'product' => $first['product'],
                     'details' => $first['details'],
                     'weight' => $rows->sum('weight'),
