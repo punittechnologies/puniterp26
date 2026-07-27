@@ -739,42 +739,21 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
           weight,
         ),
       );
-      final prefixFontSize = _num(style['prefixFontSize']) ?? fontSize;
-      final suffixFontSize = _num(style['suffixFontSize']) ?? fontSize;
-      final hasAffixFontOverride =
-          (prefix.isNotEmpty && prefixFontSize != fontSize) ||
-          (suffix.isNotEmpty && suffixFontSize != fontSize);
-      if (hasAffixFontOverride) {
-        lines.addAll(
-          _splitAffixText(
-            element: element,
-            prefix: prefix,
-            value: value,
-            suffix: suffix,
-            fontSize: fontSize,
-            prefixFontSize: prefixFontSize,
-            suffixFontSize: suffixFontSize,
-            weight: weight,
-            align: align,
-            maxChars: _charsForWidth(
-              (_num(element['width']) ?? widthMm).toDouble(),
-              fontSize,
-              weight,
-            ),
-          ),
-        );
-      } else {
-        lines.add(
-          _text(
-            _alignedX(element, limitedText, fontSize, align, weight),
-            _dots(element['y']),
-            _fontName(fontSize, weight),
-            _fontMultiplier(fontSize),
-            _fontMultiplier(fontSize),
-            limitedText,
-          ),
-        );
-      }
+      // A browser can style prefix/value/suffix independently, but TVS/TSPL
+      // built-in fonts do not expose reliable glyph metrics. Sending the three
+      // parts as separate TEXT commands made the calculated cursors overlap on
+      // real 203-DPI printers. Keep each field atomic so the printer advances
+      // its own cursor and the physical output matches the single-line preview.
+      lines.add(
+        _text(
+          _alignedX(element, limitedText, fontSize, align, weight),
+          _dots(element['y']),
+          _fontName(fontSize, weight),
+          _fontMultiplier(fontSize),
+          _fontMultiplier(fontSize),
+          limitedText,
+        ),
+      );
     }
 
     if (!hasBarcode) {
@@ -836,71 +815,6 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
 
   String _text(int x, int y, String font, int xMul, int yMul, String value) {
     return 'TEXT $x,$y,"$font",0,$xMul,$yMul,"${_escape(value)}"';
-  }
-
-  Iterable<String> _splitAffixText({
-    required Map element,
-    required String prefix,
-    required String value,
-    required String suffix,
-    required num fontSize,
-    required num prefixFontSize,
-    required num suffixFontSize,
-    required String weight,
-    required String align,
-    required int maxChars,
-  }) sync* {
-    final limitedPrefix = _limit(prefix, maxChars);
-    final remainingForValue = (maxChars - limitedPrefix.length - suffix.length)
-        .clamp(0, maxChars)
-        .toInt();
-    final limitedValue = _limit(value, remainingForValue);
-    final remainingForSuffix =
-        (maxChars - limitedPrefix.length - limitedValue.length)
-            .clamp(0, maxChars)
-            .toInt();
-    final limitedSuffix = _limit(suffix, remainingForSuffix);
-    final fullText = '$limitedPrefix$limitedValue$limitedSuffix';
-    if (fullText.isEmpty) return;
-
-    final fullTextWidth =
-        _estimatedTextWidthDots(limitedPrefix, prefixFontSize, weight) +
-        _estimatedTextWidthDots(limitedValue, fontSize, weight) +
-        _estimatedTextWidthDots(limitedSuffix, suffixFontSize, weight);
-    var cursorX = _alignedXForWidth(element, fullTextWidth, align);
-    final y = _dots(element['y']);
-    if (limitedPrefix.isNotEmpty) {
-      yield _text(
-        cursorX,
-        y,
-        _fontName(prefixFontSize, weight),
-        _fontMultiplier(prefixFontSize),
-        _fontMultiplier(prefixFontSize),
-        limitedPrefix,
-      );
-      cursorX += _estimatedTextWidthDots(limitedPrefix, prefixFontSize, weight);
-    }
-    if (limitedValue.isNotEmpty) {
-      yield _text(
-        cursorX,
-        y,
-        _fontName(fontSize, weight),
-        _fontMultiplier(fontSize),
-        _fontMultiplier(fontSize),
-        limitedValue,
-      );
-      cursorX += _estimatedTextWidthDots(limitedValue, fontSize, weight);
-    }
-    if (limitedSuffix.isNotEmpty) {
-      yield _text(
-        cursorX,
-        y,
-        _fontName(suffixFontSize, weight),
-        _fontMultiplier(suffixFontSize),
-        _fontMultiplier(suffixFontSize),
-        limitedSuffix,
-      );
-    }
   }
 
   String _fontName(num fontSize, String weight) {
@@ -1119,8 +1033,15 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
         .replaceAll(RegExp(r'\s+'), ' ');
   }
 
-  String _escape(String value) =>
-      value.replaceAll('"', '').replaceAll(r'\', '/');
+  String _escape(String value) => value
+      .replaceAll('±', '+/-')
+      .replaceAll('–', '-')
+      .replaceAll('—', '-')
+      .replaceAll('“', '"')
+      .replaceAll('”', '"')
+      .replaceAll('’', "'")
+      .replaceAll('"', '')
+      .replaceAll(r'\', '/');
 
   String _limit(String value, int max) =>
       value.length <= max ? value : value.substring(0, max);

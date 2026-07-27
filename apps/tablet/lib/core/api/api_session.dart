@@ -11,6 +11,7 @@ class ApiSession {
   static const _deviceIdKey = 'device_id';
   static const _emailKey = 'api_email';
   static const _accountScopeKey = 'api_account_scope';
+  static const _companyNameKey = 'api_company_name';
   static const defaultBaseUrl = 'https://erp.puniterp.com/api/v1';
 
   static Future<String> baseUrl() async {
@@ -35,6 +36,22 @@ class ApiSession {
     } catch (_) {
       // Pure Dart repository tests do not initialize Flutter platform channels.
       return 'signed-out';
+    }
+  }
+
+  static Future<String?> companyName() async {
+    final prefs = await SharedPreferences.getInstance();
+    final value = prefs.getString(_companyNameKey)?.trim();
+    return value == null || value.isEmpty ? null : value;
+  }
+
+  static Future<void> saveCompanyName(Object? value) async {
+    final name = value?.toString().trim();
+    final prefs = await SharedPreferences.getInstance();
+    if (name == null || name.isEmpty) {
+      await prefs.remove(_companyNameKey);
+    } else {
+      await prefs.setString(_companyNameKey, name);
     }
   }
 
@@ -80,6 +97,8 @@ class ApiSession {
         : email;
     final tenantId = user['tenantId']?.toString().trim();
     final userId = user['id']?.toString().trim();
+    final tenant = user['tenant'];
+    final companyName = tenant is Map ? tenant['name'] : null;
     final accountScope =
         tenantId != null &&
             tenantId.isNotEmpty &&
@@ -92,6 +111,7 @@ class ApiSession {
     await prefs.setString(_tokenKey, accessToken);
     await prefs.setString(_emailKey, accountKey);
     await prefs.setString(_accountScopeKey, accountScope);
+    await saveCompanyName(companyName);
     await deviceId();
 
     return ApiClient(baseUrl: normalized, token: accessToken);
@@ -102,6 +122,7 @@ class ApiSession {
     await prefs.remove(_tokenKey);
     await prefs.remove(_emailKey);
     await prefs.remove(_accountScopeKey);
+    await prefs.remove(_companyNameKey);
   }
 
   static String _normalizeBaseUrl(String value) {

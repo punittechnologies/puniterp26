@@ -892,12 +892,14 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
         _showCornerMessage(printerMessage, error: true);
         return;
       }
+      final adminCompanyName = await ApiSession.companyName();
       final result = await printerAdapter.print(
         PrintJob(
           jobId: 'print_${DateTime.now().microsecondsSinceEpoch}',
           template: activeTemplate?.templateJson ?? const {},
           data: {
-            'company_name': _companyNameForTemplate(activeTemplate),
+            'company_name':
+                adminCompanyName ?? _companyNameForTemplate(activeTemplate),
             'product_name': product.name,
             'variant_name': null,
             'serial_number': saved.serialNumber,

@@ -103,6 +103,9 @@ class LabelTemplateRepository {
   }
 
   Future<void> activatePayload(Map<String, dynamic> payload) async {
+    if (payload.containsKey('companyName')) {
+      await ApiSession.saveCompanyName(payload['companyName']);
+    }
     final localId = await _localTemplateId();
     await database.transaction(() async {
       final localTemplates = await (database.select(

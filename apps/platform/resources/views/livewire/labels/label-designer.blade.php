@@ -311,16 +311,9 @@
                     </label>
                 </div>
 
-                <div class="label-format-grid" x-show="!['barcode','image','rectangle','line'].includes(selectedElement?.type)">
-                    <label>
-                        <span>Prefix size</span>
-                        <input type="number" min="4" max="72" step="1" x-model.number="selectedElement.style.prefixFontSize" x-on:change="updateSelected('style.prefixFontSize', selectedElement.style.prefixFontSize || selectedElement.style.fontSize)">
-                    </label>
-                    <label>
-                        <span>Suffix size</span>
-                        <input type="number" min="4" max="72" step="1" x-model.number="selectedElement.style.suffixFontSize" x-on:change="updateSelected('style.suffixFontSize', selectedElement.style.suffixFontSize || selectedElement.style.fontSize)">
-                    </label>
-                </div>
+                <p class="label-preview-value-note" x-show="!['barcode','image','rectangle','line'].includes(selectedElement?.type)">
+                    Prefix, live value and suffix use one font size so the web preview and 203-DPI printer stay aligned.
+                </p>
 
                 <div class="label-format-buttons" x-show="!['barcode','image','rectangle','line'].includes(selectedElement?.type)">
                     <button type="button" x-on:click="changeFontSize(-1)">Font -</button>

@@ -114,19 +114,10 @@ void main() {
                 'align': 'center',
               },
             },
-            {
-              'type': 'barcode',
-              'x': 5,
-              'y': 52,
-              'width': 65,
-              'height': 17,
-            },
+            {'type': 'barcode', 'x': 5, 'y': 52, 'width': 65, 'height': 17},
           ],
         },
-        data: {
-          'company_name': 'PUNIT ERP',
-          'barcode_value': 'PHKS06B99XB',
-        },
+        data: {'company_name': 'PUNIT ERP', 'barcode_value': 'PHKS06B99XB'},
       ),
     );
 
@@ -135,6 +126,43 @@ void main() {
     expect(tspl, contains('TEXT 228,32,"3",0,1,1,"PUNIT ERP"'));
     expect(tspl, contains('BARCODE 124,416,"128",72,0,0,2,2,'));
     expect(tspl, contains('TEXT 256,560,"1",0,1,1,"PHKS06B99XB"'));
+  });
+
+  test('TSPL keeps prefix value and suffix in one atomic text command', () {
+    final tspl = BluetoothThermalPrinterAdapter().debugTspl(
+      const PrintJob(
+        jobId: 'job-affix-overlap',
+        template: {
+          'widthMm': 75,
+          'heightMm': 75,
+          'elements': [
+            {
+              'type': 'binding_text',
+              'bindingKey': 'product.name',
+              'prefix': 'PART: ',
+              'suffix': ' ±',
+              'x': 5,
+              'y': 20,
+              'width': 65,
+              'height': 8,
+              'style': {
+                'fontSize': 12,
+                'prefixFontSize': 7,
+                'suffixFontSize': 18,
+                'fontWeight': '800',
+                'align': 'left',
+              },
+            },
+            {'type': 'barcode', 'x': 5, 'y': 52, 'width': 65, 'height': 17},
+          ],
+        },
+        data: {'product_name': 'DM19C3', 'barcode_value': 'PHK123'},
+      ),
+    );
+
+    expect(tspl, contains('TEXT 40,160,"3",0,1,1,"PART: DM19C3 +/-"'));
+    expect(tspl, isNot(contains('"PART: "')));
+    expect(tspl, isNot(contains('"DM19C3"')));
   });
 
   test('TSPL image element is emitted as raw bitmap bytes', () {

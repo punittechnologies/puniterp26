@@ -117,6 +117,7 @@ class LabelTemplateController extends Controller
 
         return response()->json([
             'configurationVersion' => (int) LabelTemplate::query()->where('tenant_id', $tenantContext->tenantId())->max('active_version') ?: 1,
+            'companyName' => $tenantContext->tenant()?->name,
             'appDefaultTemplateId' => $appDefaultTemplate?->id,
             'appDefaultTemplateCode' => $appTemplateCode,
             'templates' => LabelTemplateResource::collection($templates),
