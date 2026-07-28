@@ -705,59 +705,12 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
                                 message =
                                     'Sending text, barcode and QR test print...';
                               });
-                              final result = await printerAdapter.print(
-                                PrintJob(
-                                  jobId:
-                                      'test_${DateTime.now().microsecondsSinceEpoch}',
-                                  template: const {
-                                    'widthMm': 75,
-                                    'heightMm': 75,
-                                    'elements': [
-                                      {
-                                        'type': 'static_text',
-                                        'bindingKey': 'PUNIT PRINTER TEST',
-                                        'x': 10,
-                                        'y': 5,
-                                        'width': 55,
-                                        'height': 7,
-                                        'style': {
-                                          'fontSize': 11,
-                                          'fontWeight': 'bold',
-                                          'align': 'center',
-                                        },
-                                      },
-                                      {
-                                        'type': 'qr',
-                                        'bindingKey': 'qr.value',
-                                        'x': 22,
-                                        'y': 14,
-                                        'width': 31,
-                                        'height': 31,
-                                      },
-                                      {
-                                        'type': 'barcode',
-                                        'bindingKey': 'barcode.value',
-                                        'x': 10,
-                                        'y': 50,
-                                        'width': 55,
-                                        'height': 12,
-                                      },
-                                    ],
-                                  },
-                                  data: {
-                                    'company_name': 'Punit ERP',
-                                    'product_name': 'Printer Test',
-                                    'serial_number': 'TEST',
-                                    'barcode_value': 'TEST123',
-                                    'qr_value': 'https://erp.puniterp.com',
-                                    '_force_qr_test': true,
-                                    'gross_weight': 12.480,
-                                    'tare_weight': 0.000,
-                                    'net_weight': 12.480,
-                                    'unit': 'kg',
-                                  },
-                                ),
-                              );
+                              // Use the exact raw TSPL command proven on the
+                              // TVS LP 46 Dlite+ BT in QR Diagnostic Test B.
+                              final result = await printerAdapter
+                                  .printQrDiagnostic(
+                                    QrDiagnosticMode.tsplCommand,
+                                  );
                               sheetSetState(() {
                                 busy = false;
                                 message = result.message ?? result.status;
@@ -1375,7 +1328,9 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
   void _showPrintSuccess() {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Label printed: ${lastSavedBarcode ?? '-'}'),
+        content: Text(
+          'Print command sent: ${lastSavedBarcode ?? '-'}. Confirm the physical label came out.',
+        ),
         behavior: SnackBarBehavior.floating,
         width: 320,
         backgroundColor: const Color(0xFF087A4A),

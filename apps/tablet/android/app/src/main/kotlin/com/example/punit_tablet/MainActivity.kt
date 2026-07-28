@@ -512,15 +512,60 @@ class MainActivity : FlutterActivity() {
         }
 
         return try {
-            val code = printer.WritePort(bytes, bytes.size)
-            if (code == 0) {
-                mapOf("ok" to true, "code" to 0, "message" to "Selected label template sent to TVS printer.")
-            } else {
-                failPrint(code, "WritePort template")
+            printerStatusError(printer)?.let { return it }
+
+            // Web templates can contain raw BITMAP logo bytes. A single large
+            // SDK write can report success while the Bluetooth buffer silently
+            // drops the tail of the TSPL stream, including PRINT. Send ordered
+            // chunks so the complete command reaches the LP 46.
+            val chunkSize = 512
+            var offset = 0
+            var chunks = 0
+            while (offset < bytes.size) {
+                val end = minOf(offset + chunkSize, bytes.size)
+                val chunk = bytes.copyOfRange(offset, end)
+                val code = printer.WritePort(chunk, chunk.size)
+                if (code != 0) {
+                    return failPrint(code, "WritePort template chunk ${chunks + 1}")
+                }
+                offset = end
+                chunks += 1
+                if (offset < bytes.size) Thread.sleep(20)
             }
+            Thread.sleep(180)
+            printerStatusError(printer)?.let { return it }
+
+            mapOf(
+                "ok" to true,
+                "code" to 0,
+                "bytes" to bytes.size,
+                "chunks" to chunks,
+                "message" to "Print command sent to TVS printer. Confirm that the physical label came out."
+            )
         } catch (error: Throwable) {
             mapOf("ok" to false, "code" to -13, "message" to (error.message ?: error.toString()))
         }
+    }
+
+    private fun printerStatusError(printer: LabelPrinter): Map<String, Any>? {
+        val status = try {
+            printer.GetStatus()
+        } catch (_: Throwable) {
+            // Some firmware revisions do not return Bluetooth status.
+            null
+        } ?: return null
+
+        val message = when {
+            status.is_paper_out != 0 -> "Printer is out of labels."
+            status.is_head_opened != 0 -> "Printer head is open."
+            status.is_ribbon_out != 0 -> "Printer ribbon is out."
+            status.is_head_too_hot != 0 -> "Printer head is too hot."
+            status.is_cutter_error != 0 -> "Printer cutter error."
+            status.is_paused != 0 -> "Printer is paused."
+            else -> null
+        } ?: return null
+
+        return mapOf("ok" to false, "code" to -15, "message" to message)
     }
 
     private fun tvsPrintRawBytesWithQr(
