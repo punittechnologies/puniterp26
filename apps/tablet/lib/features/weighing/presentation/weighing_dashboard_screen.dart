@@ -36,6 +36,116 @@ class WeighingDashboardScreen extends StatefulWidget {
       _WeighingDashboardScreenState();
 }
 
+class WebBatchConfig {
+  const WebBatchConfig({
+    required this.id,
+    required this.name,
+    required this.products,
+  });
+
+  factory WebBatchConfig.fromJson(Map<String, dynamic> json) {
+    final name =
+        json['name'] ??
+        json['batch_name'] ??
+        json['batch'] ??
+        json['title'] ??
+        json['code'];
+    final rawProducts =
+        json['products'] ??
+        json['items'] ??
+        json['product_fields'] ??
+        json['products_fields_values'] ??
+        json['details'];
+
+    return WebBatchConfig(
+      id: json['id']?.toString() ?? name?.toString() ?? '',
+      name: name?.toString().trim() ?? '',
+      products: WebBatchProductConfig.fromCollection(rawProducts),
+    );
+  }
+
+  final String id;
+  final String name;
+  final List<WebBatchProductConfig> products;
+}
+
+class WebBatchProductConfig {
+  const WebBatchProductConfig({
+    this.productId,
+    this.productName,
+    this.productCode,
+    required this.fields,
+  });
+
+  factory WebBatchProductConfig.fromJson(Map<String, dynamic> json) {
+    final rawFields =
+        json['fields'] ??
+        json['values'] ??
+        json['field_values'] ??
+        json['details'] ??
+        json['attributes'];
+
+    return WebBatchProductConfig(
+      productId: json['product_id']?.toString(),
+      productName:
+          json['product_name']?.toString() ??
+          json['product']?.toString() ??
+          json['name']?.toString(),
+      productCode: json['product_code']?.toString() ?? json['code']?.toString(),
+      fields: _fieldsFrom(rawFields),
+    );
+  }
+
+  final String? productId;
+  final String? productName;
+  final String? productCode;
+  final Map<String, dynamic> fields;
+
+  static List<WebBatchProductConfig> fromCollection(Object? raw) {
+    if (raw is List) {
+      return raw
+          .whereType<Map>()
+          .map(
+            (item) => WebBatchProductConfig.fromJson(
+              item.map((key, value) => MapEntry('$key', value)),
+            ),
+          )
+          .toList();
+    }
+    if (raw is Map) {
+      return raw.entries.where((entry) => entry.value is Map).map((entry) {
+        final item = (entry.value as Map).map(
+          (key, value) => MapEntry('$key', value),
+        );
+        item.putIfAbsent('product_name', () => entry.key.toString());
+        return WebBatchProductConfig.fromJson(item);
+      }).toList();
+    }
+    return const [];
+  }
+
+  static Map<String, dynamic> _fieldsFrom(Object? raw) {
+    if (raw is Map) {
+      return raw.map((key, value) => MapEntry('$key', value));
+    }
+    if (raw is List) {
+      final result = <String, dynamic>{};
+      for (final item in raw.whereType<Map>()) {
+        final key =
+            item['field'] ?? item['label'] ?? item['name'] ?? item['key'];
+        final value =
+            item['value'] ?? item['display_value'] ?? item['raw_value'];
+        final textKey = key?.toString().trim();
+        if (textKey != null && textKey.isNotEmpty && value != null) {
+          result[textKey] = value;
+        }
+      }
+      return result;
+    }
+    return const {};
+  }
+}
+
 class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
   late final LocalDatabase database;
   late final ProductRepository productRepository;
@@ -54,8 +164,12 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
 
   List<ProductConfig> products = [];
   List<DynamicFieldConfig> fields = [];
+  List<WebBatchConfig> webBatches = [];
+  List<String> batchOptions = [];
   ProductConfig? selectedProduct;
   ProductVariantConfig? selectedVariant;
+  String? selectedBatch;
+  bool batchEntryMode = false;
   ScaleReading reading = ScaleReading(
     grossWeight: 0,
     unit: 'kg',
@@ -85,6 +199,7 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
   bool qrDiagnosticBusy = false;
   final Map<String, TextEditingController> fieldControllers = {};
   final Map<String, String> dynamicValues = {};
+  final Set<String> _batchAppliedKeys = {};
   final TextEditingController manualTareController = TextEditingController();
   static const _deletePasswordKey = 'weighing.delete_password';
 
@@ -279,15 +394,34 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
     }
     final loadedProducts = await productRepository.cachedProducts();
     final loadedFields = await _weighingFields();
+    final loadedBatches = (await productRepository.cachedBatches())
+        .map(WebBatchConfig.fromJson)
+        .where((batch) => batch.name.isNotEmpty)
+        .toList();
+    final loadedBatchOptions =
+        loadedBatches.map((batch) => batch.name).toSet().toList()
+          ..sort((a, b) => a.compareTo(b));
     final pending = await syncQueueService.pendingCount();
     if (!mounted) return;
     setState(() {
       products = loadedProducts;
       fields = loadedFields;
+      webBatches = loadedBatches;
+      batchOptions = loadedBatchOptions;
       pendingSync = pending;
-      selectedProduct = loadedProducts.firstOrNull;
+      if (selectedBatch != null &&
+          !loadedBatchOptions.contains(selectedBatch)) {
+        selectedBatch = null;
+      }
+      selectedProduct = batchEntryMode
+          ? _preferredProductForBatch(loadedProducts, selectedBatch)
+          : loadedProducts
+                    .where((product) => product.id == selectedProduct?.id)
+                    .firstOrNull ??
+                loadedProducts.firstOrNull;
       selectedVariant = null;
     });
+    _applyBatchDetails();
     await _refreshDerived();
   }
 
@@ -305,6 +439,143 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
     return byKey.values.toList()
       ..sort((a, b) => a.fieldLabel.compareTo(b.fieldLabel));
   }
+
+  List<ProductConfig> get _visibleProducts {
+    if (!batchEntryMode) return products;
+    final batch = selectedBatch?.trim();
+    if (batch == null || batch.isEmpty) return const [];
+    final config = _webBatchFor(batch);
+    if (config == null) return const [];
+
+    return products
+        .where(
+          (product) => config.products.any(
+            (batchProduct) => _matchesBatchProduct(product, batchProduct),
+          ),
+        )
+        .toList();
+  }
+
+  WebBatchConfig? _webBatchFor(String batchName) {
+    final wanted = _normalizedKey(batchName);
+    return webBatches
+        .where((batch) => _normalizedKey(batch.name) == wanted)
+        .firstOrNull;
+  }
+
+  WebBatchProductConfig? _webBatchProductFor(ProductConfig product) {
+    final batch = selectedBatch?.trim();
+    if (batch == null || batch.isEmpty) return null;
+    final config = _webBatchFor(batch);
+    return config?.products
+        .where((item) => _matchesBatchProduct(product, item))
+        .firstOrNull;
+  }
+
+  bool _matchesBatchProduct(
+    ProductConfig product,
+    WebBatchProductConfig batchProduct,
+  ) {
+    final productId = batchProduct.productId?.trim();
+    if (productId != null && productId.isNotEmpty && product.id == productId) {
+      return true;
+    }
+    final productName = batchProduct.productName?.trim();
+    if (productName != null &&
+        productName.isNotEmpty &&
+        _normalizedKey(product.name) == _normalizedKey(productName)) {
+      return true;
+    }
+    final productCode = batchProduct.productCode?.trim();
+    return productCode != null &&
+        productCode.isNotEmpty &&
+        _normalizedKey(product.productCode) == _normalizedKey(productCode);
+  }
+
+  ProductConfig? _preferredProductForBatch(
+    List<ProductConfig> source,
+    String? batchName,
+  ) {
+    if (batchName == null || batchName.trim().isEmpty) return null;
+    final config = _webBatchFor(batchName);
+    if (config == null) return null;
+    return source
+        .where(
+          (product) => config.products.any(
+            (batchProduct) => _matchesBatchProduct(product, batchProduct),
+          ),
+        )
+        .firstOrNull;
+  }
+
+  void _applyBatchDetails() {
+    for (final key in _batchAppliedKeys) {
+      dynamicValues.remove(key);
+      fieldControllers[key]?.clear();
+    }
+    _batchAppliedKeys.clear();
+
+    if (!batchEntryMode) return;
+    final product = selectedProduct;
+    final batch = selectedBatch?.trim();
+    if (product == null || batch == null || batch.isEmpty) return;
+
+    _setBatchValue('batch', batch);
+    _setBatchValue('batch_number', batch);
+    for (final field in fields.where(_isBatchField)) {
+      _setBatchValue(field.internalKey, batch);
+    }
+
+    final batchProduct = _webBatchProductFor(product);
+    if (batchProduct == null) return;
+    for (final entry in batchProduct.fields.entries) {
+      final field = fields
+          .where(
+            (candidate) =>
+                _normalizedKey(candidate.internalKey) ==
+                    _normalizedKey(entry.key) ||
+                _normalizedKey(candidate.fieldLabel) ==
+                    _normalizedKey(entry.key),
+          )
+          .firstOrNull;
+      _setBatchValue(field?.internalKey ?? entry.key, entry.value);
+    }
+  }
+
+  void _setBatchValue(String key, Object? rawValue) {
+    final value = _displayValue(rawValue);
+    if (value == null || value.isEmpty) return;
+    dynamicValues[key] = value;
+    fieldControllers[key]?.text = value;
+    _batchAppliedKeys.add(key);
+  }
+
+  String? _displayValue(Object? rawValue) {
+    if (rawValue == null) return null;
+    if (rawValue is Map) {
+      return _displayValue(
+        rawValue['label'] ??
+            rawValue['display_value'] ??
+            rawValue['value'] ??
+            rawValue['raw_value'] ??
+            rawValue['internal_value'] ??
+            rawValue['name'],
+      );
+    }
+    final value = rawValue.toString().trim();
+    return value.isEmpty ? null : value;
+  }
+
+  bool _isBatchField(DynamicFieldConfig field) {
+    return _normalizedKey(field.internalKey).contains('batch') ||
+        _normalizedKey(field.fieldLabel).contains('batch');
+  }
+
+  String _normalizedKey(String value) =>
+      value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
+
+  String _batchPrintValue() =>
+      batchEntryMode ? selectedBatch?.trim() ?? '' : '';
 
   Future<void> _loadPrinter() async {
     final saved = await printerAdapter.savedPrinter();
@@ -781,12 +1052,17 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
   Future<LocalProductionTransaction?> _capture({
     bool syncAfterSave = true,
   }) async {
+    if (batchEntryMode && (selectedBatch == null || selectedBatch!.isEmpty)) {
+      _showCornerMessage('Print stopped: select a batch first.', error: true);
+      return null;
+    }
     final product = selectedProduct;
     final computed = computation;
     if (product == null) {
       _showCornerMessage('Print stopped: select a product first.', error: true);
       return null;
     }
+    _applyBatchDetails();
     if (computed == null) {
       _showCornerMessage(
         'Print stopped: waiting for a live scale reading. Confirm the scale is connected.',
@@ -1073,6 +1349,7 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
                 adminCompanyName ?? _companyNameForTemplate(activeTemplate),
             'product_name': product.name,
             'variant_name': null,
+            'batch_number': _batchPrintValue(),
             'serial_number': saved.serialNumber,
             'barcode_value': saved.barcodeValue,
             'qr_value': qrValue,
@@ -1829,6 +2106,9 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const _SectionLabel('PRODUCT SELECTION'),
+          _entryTypeSelector(),
+          if (batchEntryMode) ...[const SizedBox(height: 12), _batchDropdown()],
+          const SizedBox(height: 12),
           _productDropdown(),
           _dynamicDetails(),
           const SizedBox(height: 22),
@@ -1883,6 +2163,12 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
       children: [
         const _SectionLabel('PRODUCT SELECTION'),
         const SizedBox(height: 8),
+        _entryTypeSelector(compact: true),
+        if (batchEntryMode) ...[
+          const SizedBox(height: 10),
+          _batchDropdown(compact: true),
+        ],
+        const SizedBox(height: 10),
         _productDropdown(),
         _dynamicDetails(compact: true),
         const SizedBox(height: 14),
@@ -1934,11 +2220,24 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
   }
 
   Widget _productDropdown() {
+    final visibleProducts = _visibleProducts;
+    final current = visibleProducts
+        .where((product) => product.id == selectedProduct?.id)
+        .firstOrNull;
+
     return DropdownButtonFormField<ProductConfig>(
-      initialValue: selectedProduct,
+      key: ValueKey(
+        'product-${batchEntryMode ? selectedBatch ?? 'none' : 'non-batch'}-${current?.id ?? 'none'}',
+      ),
+      initialValue: current,
       isExpanded: true,
-      decoration: _fieldDecoration(),
-      items: products
+      decoration: _fieldDecoration().copyWith(
+        labelText: batchEntryMode ? 'Batch product' : 'Product',
+        hintText: batchEntryMode && selectedBatch == null
+            ? 'Select batch first'
+            : 'Select product',
+      ),
+      items: visibleProducts
           .map(
             (product) => DropdownMenuItem(
               value: product,
@@ -1950,6 +2249,78 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
         setState(() {
           selectedProduct = product;
           selectedVariant = null;
+          _applyBatchDetails();
+        });
+        await _refreshDerived();
+      },
+    );
+  }
+
+  Widget _entryTypeSelector({bool compact = false}) {
+    return SegmentedButton<bool>(
+      showSelectedIcon: false,
+      segments: const [
+        ButtonSegment(value: false, label: Text('Non Batch Entry')),
+        ButtonSegment(value: true, label: Text('Batch Entry')),
+      ],
+      selected: {batchEntryMode},
+      onSelectionChanged: (selection) async {
+        final next = selection.first;
+        setState(() {
+          batchEntryMode = next;
+          selectedBatch = null;
+          selectedVariant = null;
+          selectedProduct = next ? null : products.firstOrNull;
+          _applyBatchDetails();
+        });
+        await _refreshDerived();
+      },
+      style: ButtonStyle(visualDensity: compact ? VisualDensity.compact : null),
+    );
+  }
+
+  Widget _batchDropdown({bool compact = false}) {
+    if (batchOptions.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: EdgeInsets.all(compact ? 10 : 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF7ED),
+          border: Border.all(color: const Color(0xFFFDBA74)),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Text(
+          'No active batches synced. Create a Product Batch in the web panel, then refresh.',
+          style: TextStyle(
+            color: Color(0xFF9A3412),
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      );
+    }
+
+    return DropdownButtonFormField<String>(
+      key: ValueKey('batch-${selectedBatch ?? 'none'}'),
+      initialValue: batchOptions.contains(selectedBatch) ? selectedBatch : null,
+      isExpanded: true,
+      decoration: _fieldDecoration().copyWith(
+        labelText: 'Batch',
+        hintText: 'Select batch',
+      ),
+      items: batchOptions
+          .map(
+            (batch) => DropdownMenuItem(
+              value: batch,
+              child: Text(batch, overflow: TextOverflow.ellipsis),
+            ),
+          )
+          .toList(),
+      onChanged: (batch) async {
+        setState(() {
+          selectedBatch = batch;
+          selectedProduct = _preferredProductForBatch(products, batch);
+          selectedVariant = null;
+          _applyBatchDetails();
         });
         await _refreshDerived();
       },

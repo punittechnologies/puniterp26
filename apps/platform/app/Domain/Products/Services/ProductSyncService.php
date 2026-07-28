@@ -4,6 +4,7 @@ namespace App\Domain\Products\Services;
 
 use App\Models\ProductConfiguration\DynamicFieldDefinition;
 use App\Models\ProductConfiguration\Product;
+use App\Models\ProductConfiguration\ProductBatch;
 use App\Models\ProductConfiguration\ProductDeviceAssignment;
 use App\Models\ProductConfiguration\Unit;
 use App\Models\ProductConfiguration\WeightRule;
@@ -20,6 +21,7 @@ class ProductSyncService
         return [
             'configurationVersion' => $this->configurationVersion($tenantId),
             'products' => $products->map(fn (Product $product) => $this->productPayload($product))->values(),
+            'batches' => $this->batchPayload($tenantId),
             'dynamicFields' => DynamicFieldDefinition::query()
                 ->where('tenant_id', $tenantId)
                 ->where('is_active', true)
@@ -90,6 +92,53 @@ class ProductSyncService
                 ])
                 ->values(),
         ];
+    }
+
+    public function batchPayload(string $tenantId): array
+    {
+        $products = Product::query()
+            ->where('tenant_id', $tenantId)
+            ->get(['id', 'name', 'product_code'])
+            ->keyBy('id');
+
+        return ProductBatch::query()
+            ->where('tenant_id', $tenantId)
+            ->where('is_active', true)
+            ->whereNull('deleted_at')
+            ->orderBy('batch_name')
+            ->get()
+            ->map(function (ProductBatch $batch) use ($products): array {
+                $items = collect($batch->batch_items ?: [[
+                    'product_id' => $batch->product_id,
+                    'details' => $batch->detail_values ?: [
+                        $batch->attribute_key => [
+                            'label' => $batch->attribute_label,
+                            'value' => $batch->attribute_value,
+                        ],
+                    ],
+                ]])->map(function (array $item) use ($products): array {
+                    $product = $products->get($item['product_id'] ?? null);
+
+                    return [
+                        'product_id' => $item['product_id'] ?? null,
+                        'product_name' => $item['product_name'] ?? $product?->name,
+                        'product_code' => $item['product_code'] ?? $product?->product_code,
+                        'details' => $item['details'] ?? [],
+                    ];
+                })->values()->all();
+
+                return [
+                    'id' => $batch->id,
+                    'name' => $batch->batch_name,
+                    'batch_name' => $batch->batch_name,
+                    'is_active' => $batch->is_active,
+                    'created_at' => $batch->created_at?->toISOString(),
+                    'products' => $items,
+                    'items' => $items,
+                ];
+            })
+            ->values()
+            ->all();
     }
 
     private function sanitizedAttributes($model): array

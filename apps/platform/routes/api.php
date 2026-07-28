@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\V1\Operations\CustomerController;
 use App\Http\Controllers\Api\V1\Operations\InventoryController;
 use App\Http\Controllers\Api\V1\Operations\ReportController;
 use App\Http\Controllers\Api\V1\Operations\SyncController;
+use App\Http\Controllers\Api\V1\Products\ProductBatchController;
 use App\Http\Controllers\Api\V1\Products\ProductCategoryController;
 use App\Http\Controllers\Api\V1\Products\ProductConfigurationController;
 use App\Http\Controllers\Api\V1\Products\ProductController;
@@ -25,6 +26,8 @@ Route::prefix('v1')->group(function (): void {
         Route::get('sync/bootstrap', [FoundationController::class, 'syncBootstrap']);
 
         Route::get('sync/products', ProductSyncController::class)->middleware('permission:app.login|products.view');
+        Route::get('sync/batches', [ProductBatchController::class, 'index'])->middleware('permission:app.login|products.view');
+        Route::get('batches', [ProductBatchController::class, 'index'])->middleware('permission:app.login|products.view');
         Route::get('configuration/products', [ProductConfigurationController::class, 'history'])->middleware('permission:configuration.history.view');
 
         Route::apiResource('product-categories', ProductCategoryController::class)

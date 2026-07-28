@@ -271,6 +271,10 @@ class _LabelPreviewScreenState extends State<LabelPreviewScreen> {
             if (!selectedBindings.contains(normalized)) {
               selectedBindings.add(normalized);
             }
+          case 'batch.number':
+            if (!selectedBindings.contains(normalized)) {
+              selectedBindings.add(normalized);
+            }
           case 'weight.gross':
             printGross = true;
           case 'weight.tare':
@@ -1518,6 +1522,7 @@ class _LabelPreviewScreenState extends State<LabelPreviewScreen> {
     if (key == 'weight.tare') return 'Tare';
     if (key == 'weight.net') return 'Net';
     if (key == 'pieces.quantity') return 'PCS';
+    if (key == 'batch.number') return 'Batch No';
     if (key == 'serial.number') return 'Sr. No';
     if (key == 'date.current') return 'Date';
     if (key == 'time.current') return 'Time';
@@ -1537,6 +1542,7 @@ class _LabelPreviewScreenState extends State<LabelPreviewScreen> {
       'weight.tare' => '0.800',
       'weight.net' => '11.674',
       'pieces.quantity' => '48',
+      'batch.number' => 'BATCH-01',
       'serial.number' => '1',
       'date.current' => '2026-07-03',
       'time.current' => '18:30',

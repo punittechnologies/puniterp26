@@ -1,10 +1,14 @@
 import 'dart:convert';
 
 import 'package:drift/drift.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/api/api_client.dart';
+import '../../../core/api/api_session.dart';
 import '../../../core/database/local_database.dart';
 import '../domain/product_models.dart';
+
+const _cachedProductBatchesPrefix = 'cached_product_batches_json';
 
 class ProductRepository {
   const ProductRepository({required this.database, this.apiClient});
@@ -48,6 +52,7 @@ class ProductRepository {
   }
 
   Future<void> activatePayload(Map<String, dynamic> payload) async {
+    await _cacheBatches(payload);
     await database.transaction(() async {
       await _purgeDemoData();
       await database.delete(database.localProducts).go();
@@ -185,7 +190,67 @@ class ProductRepository {
       '/sync/products',
       query: _deviceQuery(deviceId),
     );
-    await activatePayload(response.data as Map<String, dynamic>);
+    final payload = response.data as Map<String, dynamic>;
+    final directBatches = await _fetchDirectBatches(client);
+    if (directBatches != null) {
+      payload['batches'] = directBatches;
+    }
+    await activatePayload(payload);
+  }
+
+  Future<List<dynamic>?> _fetchDirectBatches(ApiClient client) async {
+    for (final path in const ['/sync/batches', '/batches']) {
+      try {
+        final response = await client.get(path);
+        final batches = _extractBatches(response.data);
+        if (batches != null) return batches;
+      } catch (_) {
+        continue;
+      }
+    }
+    return null;
+  }
+
+  List<dynamic>? _extractBatches(Object? data) {
+    if (data is List) return data;
+    if (data is Map) {
+      for (final key in const ['batches', 'data', 'items']) {
+        final value = data[key];
+        if (value is List) return value;
+      }
+    }
+    return null;
+  }
+
+  Future<List<Map<String, dynamic>>> cachedBatches() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(await _batchCacheKey());
+    if (raw == null || raw.trim().isEmpty) return const [];
+
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const [];
+      return decoded
+          .whereType<Map>()
+          .map((item) => item.map((key, value) => MapEntry('$key', value)))
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> _cacheBatches(Map<String, dynamic> payload) async {
+    if (!payload.containsKey('batches')) return;
+    final batches = payload['batches'];
+    if (batches is! List) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(await _batchCacheKey(), jsonEncode(batches));
+  }
+
+  Future<String> _batchCacheKey() async {
+    final scope = await ApiSession.accountScope();
+    return '$_cachedProductBatchesPrefix.$scope';
   }
 
   Map<String, dynamic> _deviceQuery(String? deviceId) {

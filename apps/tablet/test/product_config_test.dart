@@ -3,6 +3,7 @@ import 'package:punit_tablet/core/database/local_database.dart';
 import 'package:punit_tablet/features/products/data/product_repository.dart';
 import 'package:punit_tablet/features/products/domain/conversion_calculator.dart';
 import 'package:punit_tablet/features/products/domain/product_models.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   test('parses product and variant effective values', () {
@@ -172,4 +173,30 @@ void main() {
       expect((await repository.cachedProducts()).single.name, 'Live Product');
     },
   );
+
+  test('keeps cached batches isolated between signed-in accounts', () async {
+    SharedPreferences.setMockInitialValues({
+      'api_account_scope': 'tenant-a:user-a',
+    });
+    final database = LocalDatabase.memory();
+    final repository = ProductRepository(database: database);
+
+    await repository.activatePayload({
+      'configurationVersion': 4,
+      'products': [],
+      'dynamicFields': [],
+      'batches': [
+        {'id': 'batch-a', 'name': 'Batch A', 'products': []},
+      ],
+    });
+
+    expect((await repository.cachedBatches()).single['name'], 'Batch A');
+
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString('api_account_scope', 'tenant-b:user-b');
+    expect(await repository.cachedBatches(), isEmpty);
+
+    await preferences.setString('api_account_scope', 'tenant-a:user-a');
+    expect((await repository.cachedBatches()).single['name'], 'Batch A');
+  });
 }

@@ -6,6 +6,7 @@
             ['Dashboard', route('admin.dashboard'), 'dashboard.view'],
             ['Products', route('admin.products'), 'products.view'],
             ['Product Details', route('admin.product-details'), 'products.view'],
+            ['Product Batches', route('admin.batches'), 'products.view'],
             ['Label Templates', route('admin.labels'), 'label_templates.view'],
             ['Inward Report', route('admin.inward-report'), 'reports.view'],
             ['Dispatch Report / Packing List', route('admin.dispatch-report'), 'reports.view'],

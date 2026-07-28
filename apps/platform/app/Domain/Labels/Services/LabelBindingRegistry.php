@@ -18,6 +18,7 @@ class LabelBindingRegistry
             ['key' => 'weight.tare', 'label' => 'Tare weight', 'type' => 'weighing'],
             ['key' => 'weight.net', 'label' => 'Net weight', 'type' => 'weighing'],
             ['key' => 'pieces.quantity', 'label' => 'Piece quantity', 'type' => 'weighing'],
+            ['key' => 'batch.number', 'label' => 'Batch No', 'type' => 'product'],
             ['key' => 'serial.number', 'label' => 'Serial number', 'type' => 'system'],
             ['key' => 'barcode.value', 'label' => 'Barcode', 'type' => 'barcode'],
             ['key' => 'qr.value', 'label' => 'QR code', 'type' => 'qr'],

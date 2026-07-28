@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Web\AdminBatchController;
 use App\Http\Controllers\Web\AdminPanelController;
 use App\Http\Controllers\Web\PublicVerificationController;
 use App\Http\Controllers\Web\QrPageController;
@@ -138,6 +139,14 @@ Route::post('/onboarding', function (Request $request) {
 })->name('onboarding.store');
 
 Route::middleware('auth')->group(function (): void {
+    Route::middleware('permission:products.view')->group(function (): void {
+        Route::get('/batches', [AdminBatchController::class, 'index'])->name('admin.batches');
+        Route::post('/batches', [AdminBatchController::class, 'store'])->name('admin.batches.store');
+        Route::delete('/batches/{batch}/items/{itemIndex}/fields/{fieldKey}', [AdminBatchController::class, 'destroyField'])
+            ->whereNumber('itemIndex')
+            ->name('admin.batches.fields.destroy');
+        Route::delete('/batches/{batch}', [AdminBatchController::class, 'destroy'])->name('admin.batches.destroy');
+    });
     Route::get('/dashboard', [AdminPanelController::class, 'dashboard'])->name('admin.dashboard');
     Route::get('/production', [AdminPanelController::class, 'production'])->name('admin.production');
     Route::post('/production', [AdminPanelController::class, 'productionCreate'])->name('admin.production.create');

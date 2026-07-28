@@ -22,6 +22,7 @@ class ThermalLabelRenderer {
     bytes.addAll([0x1B, 0x61, 0x00]); // left
     _field(bytes, 'Serial', data['serial_number']);
     _field(bytes, 'Barcode', data['barcode_value']);
+    _field(bytes, 'Batch', data['batch_number']);
     _field(bytes, 'Gross', _weight(data['gross_weight'], data['unit']));
     _field(bytes, 'Tare', _weight(data['tare_weight'], data['unit']));
     _field(bytes, 'Net', _weight(data['net_weight'], data['unit']));

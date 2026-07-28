@@ -1179,6 +1179,9 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
       'weight.tare' => _weightNumber(data['tare_weight']),
       'weight.net' => _weightNumber(data['net_weight']),
       'pieces.quantity' => _clean(data['piece_quantity']),
+      'batch.number' => _clean(
+        data['batch_number'],
+      ).ifEmpty(_dynamicValue('dynamic.batch', data)),
       'serial.number' => _clean(data['serial_number']),
       'barcode.value' => _clean(data['barcode_value']),
       'qr.value' => _clean(data['qr_value']),

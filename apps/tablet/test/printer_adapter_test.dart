@@ -19,6 +19,7 @@ void main() {
             'product_name': 'Wire',
             'serial_number': 'SER-1',
             'barcode_value': 'BAR123',
+            'batch_number': 'BATCH-01',
             'gross_weight': 12.5,
             'tare_weight': 0.5,
             'net_weight': 12,
@@ -31,6 +32,7 @@ void main() {
 
       expect(printable, contains('Wire'));
       expect(printable, contains('BAR123'));
+      expect(printable, contains('BATCH: BATCH-01'));
       expect(printable, contains('NET: 12.000 kg'));
       expect(bytes, containsAllInOrder([0x1D, 0x6B, 0x49]));
     },
@@ -91,6 +93,43 @@ void main() {
     expect(tspl, contains('Size: 16'));
     expect(tspl, contains(',"128",'));
     expect(tspl, contains('BARCODE 140,416,"128",72,0,0,1,1,'));
+  });
+
+  test('TSPL resolves the web Batch No binding without changing barcode', () {
+    final tspl = BluetoothThermalPrinterAdapter().debugTspl(
+      const PrintJob(
+        jobId: 'job-batch-binding',
+        template: {
+          'widthMm': 75,
+          'heightMm': 75,
+          'elements': [
+            {
+              'type': 'binding_text',
+              'bindingKey': 'batch.number',
+              'prefix': 'Batch: ',
+              'x': 5,
+              'y': 14,
+              'width': 65,
+              'height': 6,
+              'style': {'fontSize': 9, 'align': 'left'},
+            },
+            {
+              'type': 'barcode',
+              'bindingKey': 'barcode.value',
+              'x': 5,
+              'y': 52,
+              'width': 65,
+              'height': 17,
+            },
+          ],
+        },
+        data: {'batch_number': 'JULY-A', 'barcode_value': 'PHK123'},
+      ),
+    );
+
+    expect(tspl, contains('Batch: JULY-A'));
+    expect(tspl, contains('BARCODE '));
+    expect(tspl, contains('PHK123'));
   });
 
   test('TSPL uses real Font 3 metrics when centering bold text', () {
