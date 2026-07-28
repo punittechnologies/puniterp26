@@ -1045,7 +1045,10 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
 
   String _qrCommandTspl(Map element, String value) {
     final spec = _qrPrintSpecForElement(element, value);
-    return 'QRCODE ${spec.x},${spec.y},H,${spec.cellWidth},A,0,M2,S7,'
+    // The sizing calculation below uses medium error correction. The printer
+    // command must use the same level; requesting H here adds modules and can
+    // clip a real 80-character verification URL at the edge of its label box.
+    return 'QRCODE ${spec.x},${spec.y},M,${spec.cellWidth},A,0,M2,S7,'
         '"${_escape(value)}"';
   }
 

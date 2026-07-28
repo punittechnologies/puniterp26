@@ -240,6 +240,8 @@ void main() {
     expect(nativeTspl, contains('BARCODE '));
     expect(nativeTspl, isNot(contains('BITMAP ')));
     expect(nativeTspl, contains('QRCODE '));
+    expect(nativeTspl, contains(',M,'));
+    expect(nativeTspl, isNot(contains(',H,')));
     expect(nativeTspl, contains('/verify/'));
     expect(nativeTspl, contains('PRINT 1,1'));
     expect(qrSpec, isNotNull);
