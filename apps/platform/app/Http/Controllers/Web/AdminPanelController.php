@@ -184,6 +184,7 @@ class AdminPanelController extends Controller
         return view('admin.app-users.index', [
             'title' => 'App Users',
             'editing' => $editing,
+            'editingModules' => $editing ? $this->operatorModulesForUser($editing) : [],
             'users' => User::query()
                 ->where('tenant_id', $tenantId)
                 ->whereNotNull('app_username')
@@ -253,6 +254,83 @@ class AdminPanelController extends Controller
         });
 
         return back()->with('status', "Login created for {$user->app_username}.");
+    }
+
+    public function appUserUpdate(Request $request, User $user): RedirectResponse
+    {
+        abort_unless(Auth::user()?->hasPermission('users.manage'), 403);
+        $this->ensureTenant($user->tenant_id);
+        abort_unless($user->app_username, 404);
+
+        $access = $request->validate([
+            'access_type' => ['required', Rule::in(['app', 'web'])],
+        ]);
+        $allowedModules = $access['access_type'] === 'app'
+            ? ['production', 'dispatch']
+            : array_keys($this->operatorAccessOptions());
+        $data = [
+            ...$access,
+            ...$request->validate([
+                'name' => ['required', 'string', 'max:255'],
+                'app_username' => [
+                    'required',
+                    'alpha_dash',
+                    'min:3',
+                    'max:80',
+                    Rule::unique('users', 'app_username')->ignore($user->id),
+                ],
+                'email' => [
+                    'required',
+                    'email',
+                    'max:255',
+                    Rule::unique('users', 'email')->ignore($user->id),
+                ],
+                'password' => ['nullable', 'confirmed', Password::min(6)],
+                'access_modules' => ['required', 'array', 'min:1'],
+                'access_modules.*' => ['required', Rule::in($allowedModules)],
+            ]),
+        ];
+
+        DB::transaction(function () use ($data, $user): void {
+            $old = $user->load('roles.permissions')->toArray();
+            $changes = [
+                'name' => $data['name'],
+                'app_username' => strtolower($data['app_username']),
+                'email' => strtolower($data['email']),
+                'app_only' => $data['access_type'] === 'app',
+                'updated_by' => Auth::id(),
+            ];
+            if (! empty($data['password'])) {
+                $changes['password'] = Hash::make($data['password']);
+            }
+            $user->update($changes);
+
+            $role = Role::query()->firstOrNew([
+                'tenant_id' => $user->tenant_id,
+                'key' => 'operator-'.$user->id,
+            ]);
+            $role->fill([
+                'name' => $user->name.' '.str($data['access_type'])->upper().' Access',
+                'is_system' => false,
+                'created_by' => $role->created_by ?? Auth::id(),
+                'updated_by' => Auth::id(),
+            ])->save();
+            $role->permissions()->sync($this->permissionIdsForOperator(
+                $data['access_type'],
+                $data['access_modules'],
+            ));
+            $user->roles()->sync([$role->id]);
+            $this->audit(
+                'app_user.updated',
+                $user,
+                $old,
+                $user->fresh()->load('roles.permissions')->toArray(),
+            );
+        });
+
+        return redirect()
+            ->route('admin.app-users')
+            ->with('status', "Login updated for {$user->app_username}.");
     }
 
     public function appUserStatus(User $user): RedirectResponse
@@ -325,6 +403,19 @@ class AdminPanelController extends Controller
             'users_roles' => ['label' => 'Users & Roles', 'permissions' => ['users.manage', 'roles.manage']],
             'settings' => ['label' => 'Settings / Report Customiser', 'permissions' => ['configuration.manage', 'configuration.history.view']],
         ];
+    }
+
+    private function operatorModulesForUser(User $user): array
+    {
+        $permissionKeys = $user->roles
+            ->flatMap->permissions
+            ->pluck('key')
+            ->unique();
+
+        return collect($this->operatorAccessOptions())
+            ->filter(fn (array $option) => $permissionKeys->contains($option['permissions'][0]))
+            ->keys()
+            ->all();
     }
 
     private function permissionIdsForOperator(string $accessType, array $modules): array

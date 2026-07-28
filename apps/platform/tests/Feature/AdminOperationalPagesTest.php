@@ -98,6 +98,84 @@ class AdminOperationalPagesTest extends TestCase
         $this->actingAs($admin)->get('/dispatch')->assertOk()->assertSee('Dispatch');
     }
 
+    public function test_admin_can_edit_an_app_user_without_resetting_an_unchanged_password(): void
+    {
+        [$tenant, $admin] = $this->adminUser();
+
+        $this->actingAs($admin)->post('/app-users', [
+            'access_type' => 'app',
+            'name' => 'Scale Operator',
+            'app_username' => 'scale01',
+            'email' => 'scale01@example.test',
+            'password' => 'secret12',
+            'password_confirmation' => 'secret12',
+            'access_modules' => ['production'],
+        ])->assertRedirect();
+
+        $operator = User::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('app_username', 'scale01')
+            ->firstOrFail();
+        $passwordBefore = $operator->password;
+
+        $this->actingAs($admin)
+            ->get('/app-users?edit='.$operator->id)
+            ->assertOk()
+            ->assertSee('Edit App User')
+            ->assertSee('scale01')
+            ->assertSee('Save User Changes');
+
+        $this->actingAs($admin)->patch('/app-users/'.$operator->id, [
+            'access_type' => 'web',
+            'name' => 'Stores Operator',
+            'app_username' => 'stores01',
+            'email' => 'stores01@example.test',
+            'password' => '',
+            'password_confirmation' => '',
+            'access_modules' => ['inventory', 'reports'],
+        ])->assertRedirect('/app-users');
+
+        $operator->refresh()->load('roles.permissions');
+        $this->assertSame('Stores Operator', $operator->name);
+        $this->assertSame('stores01', $operator->app_username);
+        $this->assertSame('stores01@example.test', $operator->email);
+        $this->assertFalse($operator->app_only);
+        $this->assertSame($passwordBefore, $operator->password);
+        $this->assertEqualsCanonicalizing(
+            ['dashboard.view', 'inventory.view', 'reports.view'],
+            $operator->roles->flatMap->permissions->pluck('key')->unique()->values()->all(),
+        );
+    }
+
+    public function test_admin_cannot_edit_an_app_user_from_another_tenant(): void
+    {
+        [, $admin] = $this->adminUser();
+        $otherTenant = Tenant::query()->create([
+            'name' => 'Other Tenant',
+            'code' => 'OTHER-APP-USERS',
+            'status' => 'active',
+        ]);
+        $otherUser = User::query()->create([
+            'tenant_id' => $otherTenant->id,
+            'name' => 'Other Operator',
+            'app_username' => 'other01',
+            'email' => 'other01@example.test',
+            'password' => Hash::make('secret12'),
+            'app_only' => true,
+            'is_active' => true,
+        ]);
+
+        $this->actingAs($admin)->patch('/app-users/'.$otherUser->id, [
+            'access_type' => 'app',
+            'name' => 'Changed',
+            'app_username' => 'changed01',
+            'email' => 'changed01@example.test',
+            'access_modules' => ['production'],
+        ])->assertNotFound();
+
+        $this->assertSame('Other Operator', $otherUser->fresh()->name);
+    }
+
     private function adminUser(): array
     {
         $tenant = Tenant::query()->create([

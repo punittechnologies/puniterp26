@@ -180,6 +180,7 @@ Route::middleware('auth')->group(function (): void {
     });
     Route::get('/app-users', [AdminPanelController::class, 'appUsers'])->name('admin.app-users');
     Route::post('/app-users', [AdminPanelController::class, 'appUserStore'])->name('admin.app-users.store');
+    Route::patch('/app-users/{user}', [AdminPanelController::class, 'appUserUpdate'])->name('admin.app-users.update');
     Route::patch('/app-users/{user}/status', [AdminPanelController::class, 'appUserStatus'])->name('admin.app-users.status');
     Route::delete('/app-users/{user}', [AdminPanelController::class, 'userDestroy'])->name('admin.app-users.destroy');
     Route::delete('/admin/users/{user}', [AdminPanelController::class, 'userDestroy'])->name('admin.users.destroy');

@@ -5,41 +5,51 @@
         <section class="panel">
             <div class="panel-header">
                 <div>
-                    <h2>Create App Login</h2>
-                    <p>These credentials work only in the Punit ERP app. They cannot open the Laravel web panel.</p>
+                    <h2>{{ $editing ? 'Edit App User' : 'Create App Login' }}</h2>
+                    <p>
+                        {{ $editing
+                            ? 'Update this login, access and password without affecting other users.'
+                            : 'Create a separate operator login for the app or web panel.' }}
+                    </p>
                 </div>
             </div>
 
-            <form method="POST" action="{{ route('admin.app-users.store') }}" class="form-grid">
+            <form method="POST" action="{{ $editing ? route('admin.app-users.update', $editing) : route('admin.app-users.store') }}" class="form-grid">
                 @csrf
+                @if ($editing)
+                    @method('PATCH')
+                @endif
                 <label>
                     Login type
                     <select name="access_type" required>
-                        <option value="app" @selected(old('access_type', 'app') === 'app')>App only</option>
-                        <option value="web" @selected(old('access_type') === 'web')>Web panel</option>
+                        <option value="app" @selected(old('access_type', $editing?->app_only === false ? 'web' : 'app') === 'app')>App only</option>
+                        <option value="web" @selected(old('access_type', $editing?->app_only === false ? 'web' : 'app') === 'web')>Web panel</option>
                     </select>
                     <small>App only works in the Punit ERP app. Web panel can login at the website.</small>
                 </label>
                 <label>
                     Operator name
-                    <input name="name" value="{{ old('name') }}" placeholder="Example: Dispatch Operator 1" required>
+                    <input name="name" value="{{ old('name', $editing?->name) }}" placeholder="Example: Dispatch Operator 1" required>
                 </label>
                 <label>
                     App user ID
-                    <input name="app_username" value="{{ old('app_username') }}" placeholder="Example: dispatch01" required>
+                    <input name="app_username" value="{{ old('app_username', $editing?->app_username) }}" placeholder="Example: dispatch01" required>
                     <small>Use letters, numbers, dash or underscore. This is what the operator enters in the app.</small>
                 </label>
                 <label>
                     Email
-                    <input type="email" name="email" value="{{ old('email') }}" placeholder="operator@company.com" required>
+                    <input type="email" name="email" value="{{ old('email', $editing?->email) }}" placeholder="operator@company.com" required>
                 </label>
                 <label>
-                    Password
-                    <input type="password" name="password" required>
+                    {{ $editing ? 'New password' : 'Password' }}
+                    <input type="password" name="password" @required(! $editing)>
+                    @if ($editing)
+                        <small>Leave blank to keep the current password.</small>
+                    @endif
                 </label>
                 <label>
                     Confirm password
-                    <input type="password" name="password_confirmation" required>
+                    <input type="password" name="password_confirmation" @required(! $editing)>
                 </label>
                 <div class="access-picker full">
                     @php
@@ -62,7 +72,7 @@
                     <div class="choice-stack">
                         @foreach ($accessOptions as $key => $option)
                             <label class="choice-row" data-access-module="{{ $key }}" data-app-only="{{ in_array($key, $appOnlyModules, true) ? 'true' : 'false' }}">
-                                <input type="checkbox" name="access_modules[]" value="{{ $key }}" @checked(collect(old('access_modules', []))->contains($key))>
+                                <input type="checkbox" name="access_modules[]" value="{{ $key }}" @checked(collect(old('access_modules', $editingModules))->contains($key))>
                                 <span class="choice-icon">{{ $accessIcons[$key] ?? '-' }}</span>
                                 <span>{{ $option['label'] }}</span>
                             </label>
@@ -70,7 +80,10 @@
                     </div>
                 </div>
                 <div class="form-actions">
-                    <button class="btn primary">Create App User</button>
+                    <button class="btn primary">{{ $editing ? 'Save User Changes' : 'Create App User' }}</button>
+                    @if ($editing)
+                        <a class="btn" href="{{ route('admin.app-users') }}">Cancel</a>
+                    @endif
                 </div>
             </form>
         </section>
@@ -127,6 +140,7 @@
                             </td>
                             <td>{{ optional($user->updated_at)->format('d M Y H:i') }}</td>
                             <td>
+                                <a class="btn" href="{{ route('admin.app-users', ['edit' => $user->id]) }}">Edit</a>
                                 <form method="POST" action="{{ route('admin.app-users.status', $user) }}" class="inline-form">
                                     @csrf
                                     @method('PATCH')
