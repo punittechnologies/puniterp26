@@ -54,6 +54,14 @@ android {
             manifestPlaceholders["appLabel"] = "Punit ERP Web Label"
             signingConfig = signingConfigs.getByName("webLabelRelease")
         }
+        create("qrDiagnostic") {
+            dimension = "edition"
+            applicationId = "com.punittechnologies.puniterp.weblabel.qrdiagnostic"
+            manifestPlaceholders["appLabel"] = "Punit ERP QR Diagnostic"
+            // Temporary diagnostic package: intentionally uses the Android
+            // debug key so it never depends on or replaces the production app.
+            signingConfig = signingConfigs.getByName("debug")
+        }
     }
 
     buildTypes {

@@ -14,6 +14,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/config/app_edition.dart';
 import 'printer_adapter.dart';
 
+enum QrDiagnosticMode {
+  tvsNative('A', 'TVS native QR'),
+  tsplCommand('B', 'TSPL QR command'),
+  bitmap('C', 'Bitmap QR');
+
+  const QrDiagnosticMode(this.marker, this.label);
+
+  final String marker;
+  final String label;
+}
+
 class BluetoothThermalPrinterAdapter implements PrinterAdapter {
   BluetoothThermalPrinterAdapter({bool? qrPrintingEnabled})
     : qrPrintingEnabled = qrPrintingEnabled ?? AppEdition.webManagedLabels;
@@ -261,6 +272,106 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
         jobId: job.jobId,
         status: 'failed',
         message: 'Printer connected, but write failed: $error',
+      );
+    }
+  }
+
+  Future<PrintResult> printQrDiagnostic(QrDiagnosticMode mode) async {
+    final job = _qrDiagnosticJob(mode);
+    if (!await isConnected()) {
+      return PrintResult(
+        jobId: job.jobId,
+        status: 'failed',
+        message: 'Printer not connected. Connect the TVS printer first.',
+      );
+    }
+
+    if (mode == QrDiagnosticMode.tvsNative) {
+      if (!_nativeConnected || !Platform.isAndroid) {
+        return PrintResult(
+          jobId: job.jobId,
+          status: 'failed',
+          message:
+              'Test A requires the printer selected as [TVS Native]. Reconnect using that entry.',
+        );
+      }
+      final result = await _printNative(job);
+      return PrintResult(
+        jobId: result.jobId,
+        status: result.status,
+        message: result.status == 'printed'
+            ? 'Test A sent through the TVS native QR API. Scan the printed QR to confirm.'
+            : result.message,
+      );
+    }
+
+    final bytes = mode == QrDiagnosticMode.tsplCommand
+        ? _qrCommandDiagnosticBytes(job)
+        : _tsplBytes(job);
+    return _sendQrDiagnosticBytes(
+      jobId: job.jobId,
+      bytes: bytes,
+      label: 'Test ${mode.marker} (${mode.label})',
+    );
+  }
+
+  Future<PrintResult> _sendQrDiagnosticBytes({
+    required String jobId,
+    required Uint8List bytes,
+    required String label,
+  }) async {
+    try {
+      if (_nativeConnected && Platform.isAndroid) {
+        final response = await _tvsChannel.invokeMethod<Map<dynamic, dynamic>>(
+          'printRawTsplBytes',
+          {'bytes': bytes},
+        );
+        final ok = response?['ok'] == true;
+        return PrintResult(
+          jobId: jobId,
+          status: ok ? 'printed' : 'failed',
+          message: ok
+              ? '$label sent through TVS raw printing. Scan the printed QR to confirm.'
+              : response?['message']?.toString() ??
+                    '$label was rejected by the TVS printer.',
+        );
+      }
+
+      if (_tscConnected && Platform.isAndroid) {
+        final response = await _tscChannel.invokeMethod<Map<dynamic, dynamic>>(
+          'printRawTsplBytes',
+          {'bytes': bytes},
+        );
+        final ok = response?['ok'] == true;
+        return PrintResult(
+          jobId: jobId,
+          status: ok ? 'printed' : 'failed',
+          message: ok
+              ? '$label sent through TSC raw printing. Scan the printed QR to confirm.'
+              : response?['message']?.toString() ??
+                    '$label was rejected by the TSC printer.',
+        );
+      }
+
+      final characteristic = _writeCharacteristic;
+      if (characteristic == null) {
+        return PrintResult(
+          jobId: jobId,
+          status: 'failed',
+          message: 'Printer write channel is not ready. Reconnect printer.',
+        );
+      }
+      await _writeChunks(characteristic, bytes);
+      return PrintResult(
+        jobId: jobId,
+        status: 'printed',
+        message: '$label sent over BLE. Scan the printed QR to confirm.',
+      );
+    } catch (error) {
+      return PrintResult(
+        jobId: jobId,
+        status: 'failed',
+        message: '$label failed: $error',
       );
     }
   }
@@ -581,6 +692,83 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
     }
 
     return Uint8List.fromList(ascii.encode(_tspl(job)));
+  }
+
+  PrintJob _qrDiagnosticJob(QrDiagnosticMode mode) {
+    final marker = mode.marker;
+    return PrintJob(
+      jobId:
+          'qr_diagnostic_${marker.toLowerCase()}_${DateTime.now().microsecondsSinceEpoch}',
+      template: {
+        'widthMm': 75,
+        'heightMm': 75,
+        'elements': [
+          {
+            'type': 'static_text',
+            'bindingKey': 'QR TEST $marker',
+            'x': 10,
+            'y': 4,
+            'width': 55,
+            'height': 7,
+            'style': {'fontSize': 12, 'fontWeight': 'bold', 'align': 'center'},
+          },
+          {
+            'type': 'qr',
+            'bindingKey': 'qr.value',
+            'x': 20,
+            'y': 13,
+            'width': 35,
+            'height': 35,
+          },
+          {
+            'type': 'static_text',
+            'bindingKey': mode.label,
+            'x': 10,
+            'y': 50,
+            'width': 55,
+            'height': 6,
+            'style': {'fontSize': 8, 'align': 'center'},
+          },
+          {
+            'type': 'barcode',
+            'bindingKey': 'barcode.value',
+            'x': 15,
+            'y': 58,
+            'width': 45,
+            'height': 8,
+          },
+        ],
+      },
+      data: {
+        'qr_value':
+            'https://erp.puniterp.com/qr-diagnostic/${marker.toLowerCase()}',
+        'barcode_value': 'QRTEST$marker',
+        '_force_qr_test': true,
+      },
+    );
+  }
+
+  Uint8List _qrCommandDiagnosticBytes(PrintJob job) {
+    final marker = QrDiagnosticMode.tsplCommand.marker;
+    final value = _bindingValue('qr.value', job.data);
+    final lines = [
+      'SIZE 75 mm,75 mm',
+      'GAP 2 mm,0 mm',
+      'DENSITY 14',
+      'SPEED 3',
+      'DIRECTION 1',
+      'REFERENCE 0,0',
+      'CODEPAGE UTF-8',
+      'CLS',
+      _text(210, 30, '3', 2, 2, 'QR TEST $marker'),
+      'QRCODE 156,105,H,7,A,0,M2,S7,"${_escape(value)}"',
+      _text(170, 410, '3', 1, 1, 'TSPL QR COMMAND'),
+      'BARCODE 160,470,"128",50,0,0,2,2,"QRTEST$marker"',
+      _text(250, 530, '1', 1, 1, 'QRTEST$marker'),
+      'PRINT 1,1',
+      '',
+    ];
+    return Uint8List.fromList(ascii.encode(lines.join('\r\n')));
   }
 
   String _tspl(PrintJob job) {
@@ -1185,6 +1373,18 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
 
   Uint8List debugNativeTsplBytes(PrintJob job) =>
       _tsplBytes(job, renderQr: false, includePrint: false);
+
+  @visibleForTesting
+  Uint8List debugQrDiagnosticBytes(QrDiagnosticMode mode) {
+    final job = _qrDiagnosticJob(mode);
+    return mode == QrDiagnosticMode.tsplCommand
+        ? _qrCommandDiagnosticBytes(job)
+        : _tsplBytes(
+            job,
+            renderQr: mode != QrDiagnosticMode.tvsNative,
+            includePrint: mode != QrDiagnosticMode.tvsNative,
+          );
+  }
 
   Map<String, Object>? debugNativeQrSpec(PrintJob job) {
     final spec = _qrPrintSpec(job);

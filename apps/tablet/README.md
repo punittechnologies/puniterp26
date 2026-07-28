@@ -1,10 +1,13 @@
 # Punit ERP Android app
 
-The Android project has two installable editions:
+The Android project has three installable editions:
 
 - `classic`: the existing Punit ERP application, including app-managed labels.
 - `webLabel`: a separate application that prints only the active web template
   marked **Make default**. It does not expose the app label designer.
+- `qrDiagnostic`: a temporary, separately installable Web Label diagnostic
+  edition. It exposes three QR transport tests on the weighing screen and does
+  not save a weighment when those tests are used.
 
 The Web Label package ID is
 `com.punittechnologies.puniterp.weblabel`, so it can coexist with the classic
@@ -17,6 +20,9 @@ flutter analyze
 flutter test
 flutter test --dart-define=PUNIT_WEB_LABEL_EDITION=true
 flutter build apk --debug --flavor classic
+flutter build apk --debug --flavor qrDiagnostic \
+  --dart-define=PUNIT_WEB_LABEL_EDITION=true \
+  --dart-define=PUNIT_QR_DIAGNOSTIC=true
 ```
 
 ## Signed Web Label release

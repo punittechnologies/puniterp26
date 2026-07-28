@@ -82,6 +82,7 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
   bool usingSimulator = false;
   bool refreshing = false;
   bool savingAndPrinting = false;
+  bool qrDiagnosticBusy = false;
   final Map<String, TextEditingController> fieldControllers = {};
   final Map<String, String> dynamicValues = {};
   final TextEditingController manualTareController = TextEditingController();
@@ -893,6 +894,118 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
     }
   }
 
+  Future<void> _showQrDiagnosticPicker() async {
+    if (!AppEdition.qrDiagnostic || qrDiagnosticBusy) return;
+    final mode = await showDialog<QrDiagnosticMode>(
+      context: context,
+      builder: (context) => AlertDialog(
+        icon: const Icon(
+          Icons.qr_code_2_rounded,
+          color: Color(0xFFF97316),
+          size: 38,
+        ),
+        title: const Text('Temporary QR Printer Test'),
+        content: const Text(
+          'Choose one QR method. This prints a diagnostic label only—it does not save a weighment, change inventory, or sync a transaction.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          ...QrDiagnosticMode.values.map(
+            (mode) => FilledButton(
+              onPressed: () => Navigator.of(context).pop(mode),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFF97316),
+                foregroundColor: Colors.white,
+              ),
+              child: Text('TEST ${mode.marker} · ${mode.label}'),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (mode != null && mounted) {
+      await _runQrDiagnostic(mode);
+    }
+  }
+
+  Future<void> _runQrDiagnostic(QrDiagnosticMode mode) async {
+    if (qrDiagnosticBusy) return;
+    final printer = configuredPrinter ?? await printerAdapter.savedPrinter();
+    if (printer == null) {
+      _showCornerMessage(
+        'Connect the TVS printer before running the QR diagnostic.',
+        error: true,
+      );
+      return;
+    }
+
+    setState(() {
+      qrDiagnosticBusy = true;
+      configuredPrinter = printer;
+      printerStatus = PrinterConnectionStatus.connecting;
+      printerMessage = 'Preparing QR Test ${mode.marker}...';
+    });
+    try {
+      if (!await printerAdapter.isConnected()) {
+        await printerAdapter.connect(printer.id);
+      }
+      if (!mounted) return;
+      setState(() {
+        printerStatus = PrinterConnectionStatus.printing;
+        printerMessage = 'Printing QR Test ${mode.marker}...';
+      });
+      final result = await printerAdapter.printQrDiagnostic(mode);
+      if (!mounted) return;
+      final connected = await _printerStillConnected();
+      setState(() {
+        printerStatus = connected
+            ? PrinterConnectionStatus.connected
+            : PrinterConnectionStatus.disconnected;
+        printerMessage = result.message ?? result.status;
+      });
+      _showCornerMessage(
+        result.message ?? result.status,
+        error: result.status == 'failed',
+      );
+    } catch (error) {
+      if (!mounted) return;
+      final connected = await _printerStillConnected();
+      setState(() {
+        printerStatus = connected
+            ? PrinterConnectionStatus.connected
+            : PrinterConnectionStatus.disconnected;
+        printerMessage = 'QR Test ${mode.marker} failed: $error';
+      });
+      _showCornerMessage(printerMessage, error: true);
+    } finally {
+      if (mounted) setState(() => qrDiagnosticBusy = false);
+    }
+  }
+
+  Widget _qrDiagnosticButton() {
+    return OutlinedButton.icon(
+      onPressed: qrDiagnosticBusy ? null : _showQrDiagnosticPicker,
+      icon: qrDiagnosticBusy
+          ? const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.qr_code_2_rounded),
+      label: const Text('QR PRINTER TEST — TEMPORARY'),
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size.fromHeight(58),
+        foregroundColor: const Color(0xFF9A3412),
+        backgroundColor: const Color(0xFFFFEDD5),
+        side: const BorderSide(color: Color(0xFFF97316), width: 3),
+        textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+      ),
+    );
+  }
+
   Future<void> _printLabel(LocalProductionTransaction saved) async {
     final product = selectedProduct;
     final computed = computation;
@@ -1395,6 +1508,10 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
                           ),
                         ),
                       ),
+                      if (AppEdition.qrDiagnostic) ...[
+                        const SizedBox(height: 10),
+                        _qrDiagnosticButton(),
+                      ],
                       const SizedBox(height: 18),
                       _mobileSelectionCard(),
                       const SizedBox(height: 18),
@@ -1662,6 +1779,10 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
               minimumSize: const Size.fromHeight(62),
             ),
           ),
+          if (AppEdition.qrDiagnostic) ...[
+            const SizedBox(height: 10),
+            _qrDiagnosticButton(),
+          ],
         ],
       ),
     );

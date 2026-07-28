@@ -315,6 +315,38 @@ void main() {
     expect(tspl, contains('BARCODE '));
   });
 
+  test('QR diagnostics generate three distinct printer payloads', () {
+    final adapter = BluetoothThermalPrinterAdapter(qrPrintingEnabled: true);
+
+    final native = latin1.decode(
+      adapter.debugQrDiagnosticBytes(QrDiagnosticMode.tvsNative),
+      allowInvalid: true,
+    );
+    final command = latin1.decode(
+      adapter.debugQrDiagnosticBytes(QrDiagnosticMode.tsplCommand),
+      allowInvalid: true,
+    );
+    final bitmap = adapter.debugQrDiagnosticBytes(QrDiagnosticMode.bitmap);
+    final bitmapText = latin1.decode(bitmap, allowInvalid: true);
+
+    expect(native, contains('QR TEST A'));
+    expect(native, isNot(contains('QRCODE ')));
+    expect(native, isNot(contains('BITMAP ')));
+    expect(native, isNot(contains('PRINT 1,1')));
+
+    expect(command, contains('QR TEST B'));
+    expect(command, contains('QRCODE '));
+    expect(command, contains('/qr-diagnostic/b'));
+    expect(command, contains('PRINT 1,1'));
+    expect(command, isNot(contains('BITMAP ')));
+
+    expect(bitmapText, contains('QR TEST C'));
+    expect(bitmapText, contains('BITMAP '));
+    expect(bitmapText, contains('PRINT 1,1'));
+    expect(bitmapText, isNot(contains('QRCODE ')));
+    expect(bitmapText, isNot(contains('/qr-diagnostic/c')));
+  });
+
   test('TSPL image element is emitted as raw bitmap bytes', () {
     final image = img.Image(width: 8, height: 8);
     img.fill(image, color: img.ColorRgb8(255, 255, 255));
