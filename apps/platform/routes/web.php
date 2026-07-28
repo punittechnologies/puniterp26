@@ -160,6 +160,7 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/exports/{report}/{format}', [AdminPanelController::class, 'export'])->name('admin.exports');
     Route::get('/import', [AdminPanelController::class, 'imports'])->name('admin.imports');
     Route::get('/import/template/{type}', [AdminPanelController::class, 'importTemplate'])->name('admin.imports.template');
+    Route::get('/import/products/export', [AdminPanelController::class, 'exportProducts'])->name('admin.imports.products.export');
     Route::post('/import/products', [AdminPanelController::class, 'importProducts'])->name('admin.imports.products');
     Route::post('/import/product-details', [AdminPanelController::class, 'importProductDetails'])->name('admin.imports.product-details');
     Route::delete('/import/preview/{type}', [AdminPanelController::class, 'clearImportPreview'])->name('admin.imports.preview.clear');

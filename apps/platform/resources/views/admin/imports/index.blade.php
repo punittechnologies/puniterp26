@@ -8,6 +8,7 @@
             <span>Download the Excel template, upload your completed file, review validation results, then confirm.</span>
         </div>
         <div class="import-hero-actions">
+            <a class="btn" href="{{ route('admin.imports.products.export') }}">Export Current Products</a>
             <a class="btn" href="{{ route('admin.imports.template', 'products') }}">Download Product Excel</a>
             <a class="btn" href="{{ route('admin.imports.template', 'product-details') }}">Download Product Details Excel</a>
         </div>
@@ -19,7 +20,7 @@
                 <span class="import-icon">P</span>
                 <div>
                     <h2>Product Spreadsheet Import</h2>
-                    <p>Required columns: Product Name, Tare Weight and Unit. Product Code is optional.</p>
+                    <p>Add each new product as a new row. Only Product Name is required; blank tare becomes 0, blank unit becomes kg, and extra columns are ignored.</p>
                 </div>
             </div>
             <form method="POST" action="{{ route('admin.imports.products') }}" enctype="multipart/form-data" class="import-upload">
@@ -35,18 +36,31 @@
                 <div class="import-preview">
                     <div class="card-head subtle">
                         <h3>Product validation preview</h3>
-                        <span class="status-pill">{{ count($productPreview['records'] ?? []) }} valid</span>
+                        <div class="inline-actions">
+                            <span class="status-pill success">{{ count($productPreview['records'] ?? []) }} new</span>
+                            <span class="status-pill">{{ count($productPreview['skipped'] ?? []) }} skipped</span>
+                        </div>
                     </div>
+                    @if(($productPreview['skipped'] ?? []) !== [])
+                        <div class="notice">
+                            <strong>Existing or duplicate rows will be skipped without changing them:</strong>
+                            <ul>
+                                @foreach(array_slice($productPreview['skipped'], 0, 50) as $row)
+                                    <li>Row {{ $row['line'] }}: {{ $row['name'] }}{{ $row['product_code'] ? ' ('.$row['product_code'].')' : '' }} — {{ $row['reason'] }}</li>
+                                @endforeach
+                            </ul>
+                        </div>
+                    @endif
                     @if(($productPreview['errors'] ?? []) !== [])
                         <div class="notice error">
-                            <strong>Import blocked until these issues are corrected:</strong>
+                            <strong>New-product import blocked until these issues are corrected:</strong>
                             <ul>
                                 @foreach(array_slice($productPreview['errors'], 0, 50) as $error)
                                     <li>{{ $error }}</li>
                                 @endforeach
                             </ul>
                         </div>
-                    @else
+                    @elseif(($productPreview['records'] ?? []) !== [])
                         <div class="table-wrap">
                             <table class="data-table">
                                 <thead><tr><th>Product</th><th>Code</th><th>Tare</th><th>Unit</th></tr></thead>
@@ -67,6 +81,10 @@
                             <input type="hidden" name="confirm" value="1">
                             <button class="btn primary">Confirm Product Import</button>
                         </form>
+                    @else
+                        <div class="notice success">
+                            No new products need importing. All populated rows already exist or were duplicates.
+                        </div>
                     @endif
                     <form method="POST" action="{{ route('admin.imports.preview.clear', 'products') }}" class="form-actions">
                         @csrf

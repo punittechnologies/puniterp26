@@ -79,6 +79,32 @@ trait AdminDataExchange
         ]);
     }
 
+    public function exportProducts()
+    {
+        abort_unless(Auth::user()?->hasPermission('products.view'), 403);
+        $rows = Product::query()
+            ->where('tenant_id', $this->tenantId())
+            ->with('defaultWeightUnit')
+            ->orderBy('name')
+            ->get()
+            ->map(fn (Product $product) => [
+                $product->name,
+                $product->product_code ?? '',
+                number_format((float) ($product->default_tare_weight ?? 0), 3, '.', ''),
+                $product->defaultWeightUnit?->symbol ?: 'kg',
+            ])
+            ->all();
+
+        return response($this->xlsxWorkbook('Products', [
+            ['Product Name', 'Product Code', 'Tare Weight', 'Unit'],
+            ...$rows,
+        ]), 200, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => 'attachment; filename="products-export-'.now()->format('Ymd').'.xlsx"',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
     public function importProducts(Request $request): RedirectResponse
     {
         abort_unless(Auth::user()?->hasPermission('products.view'), 403);
@@ -96,9 +122,22 @@ trait AdminDataExchange
             }
 
             $tenantId = $this->tenantId();
-            $created = DB::transaction(function () use ($preview, $tenantId): int {
+            $result = DB::transaction(function () use ($preview, $tenantId): array {
                 $created = 0;
+                $skipped = count($preview['skipped'] ?? []);
                 foreach ($preview['records'] as $record) {
+                    $alreadyExists = Product::withTrashed()
+                        ->where('tenant_id', $tenantId)
+                        ->where(fn ($query) => $query
+                            ->whereRaw('lower(name) = ?', [mb_strtolower($record['name'])])
+                            ->orWhereRaw('lower(product_code) = ?', [mb_strtolower($record['product_code'])]))
+                        ->exists();
+                    if ($alreadyExists) {
+                        $skipped++;
+
+                        continue;
+                    }
+
                     $unit = Unit::query()
                         ->where('symbol', $record['unit'])
                         ->where('category', 'weight')
@@ -135,12 +174,15 @@ trait AdminDataExchange
                     $created++;
                 }
 
-                return $created;
+                return compact('created', 'skipped');
             });
 
-            $this->audit('products.imported', Auth::user(), [], ['created' => $created]);
+            $this->audit('products.imported', Auth::user(), [], $result);
 
-            return redirect()->route('admin.imports')->with('status', "Product import completed. Created {$created} products.");
+            return redirect()->route('admin.imports')->with(
+                'status',
+                "Product import completed. Created {$result['created']} new products; skipped {$result['skipped']} existing or duplicate rows.",
+            );
         }
 
         $data = $request->validate([
@@ -150,12 +192,13 @@ trait AdminDataExchange
         $preview = $this->buildProductPreview($headers, $rows);
         session()->put($previewKey, $preview);
 
-        return redirect()->route('admin.imports')->with(
-            'status',
-            $preview['errors'] === []
-                ? 'Product spreadsheet validated. Review the preview and confirm the import.'
-                : 'Product spreadsheet checked. Fix the listed rows and upload it again.',
-        );
+        $status = match (true) {
+            $preview['errors'] !== [] => 'Product spreadsheet checked. Fix the listed new-product rows and upload it again.',
+            $preview['records'] === [] => 'No new products found. Existing or duplicate rows were skipped safely.',
+            default => 'Product spreadsheet validated. Review the new products and confirm the import.',
+        };
+
+        return redirect()->route('admin.imports')->with('status', $status);
     }
 
     public function importProductDetails(Request $request): RedirectResponse
@@ -383,22 +426,21 @@ trait AdminDataExchange
     {
         $tenantId = $this->tenantId();
         $normalised = array_map(fn ($value) => $this->normaliseImportHeader($value), $headers);
-        $required = ['productname', 'tareweight', 'unit'];
+        $required = ['productname'];
         $errors = [];
         foreach ($required as $header) {
             if (! in_array($header, $normalised, true)) {
                 $errors[] = 'Missing required column: '.match ($header) {
                     'productname' => 'Product Name',
-                    'tareweight' => 'Tare Weight',
-                    default => 'Unit',
+                    default => $header,
                 };
             }
         }
         if ($errors !== []) {
-            return ['type' => 'products', 'records' => [], 'errors' => $errors];
+            return ['type' => 'products', 'records' => [], 'skipped' => [], 'errors' => $errors];
         }
         if (count($rows) > 2000) {
-            return ['type' => 'products', 'records' => [], 'errors' => ['A maximum of 2,000 data rows is allowed per import.']];
+            return ['type' => 'products', 'records' => [], 'skipped' => [], 'errors' => ['A maximum of 2,000 data rows is allowed per import.']];
         }
 
         $existingNames = Product::withTrashed()
@@ -415,6 +457,7 @@ trait AdminDataExchange
         $seenNames = [];
         $seenCodes = [];
         $records = [];
+        $skipped = [];
 
         foreach ($rows as $offset => $row) {
             $line = $offset + 2;
@@ -425,31 +468,52 @@ trait AdminDataExchange
             }
             $name = trim((string) ($record['productname'] ?? ''));
             $code = strtoupper(trim((string) ($record['productcode'] ?? '')));
-            $tare = trim((string) ($record['tareweight'] ?? ''));
-            $unit = strtolower(trim((string) ($record['unit'] ?? '')));
+            $tare = trim((string) ($record['tareweight'] ?? '0'));
+            $unit = strtolower(trim((string) ($record['unit'] ?? 'kg')));
+            $tare = $tare === '' ? '0' : $tare;
+            $unit = $unit === '' ? 'kg' : $unit;
             $rowErrors = [];
 
             if ($name === '') {
                 $rowErrors[] = 'Product Name is required';
             }
-            if ($tare === '' || ! is_numeric($tare) || (float) $tare < 0) {
-                $rowErrors[] = 'Tare Weight must be zero or a positive number';
+            if ($rowErrors !== []) {
+                $errors[] = 'Row '.$line.': '.implode('; ', $rowErrors);
+
+                continue;
             }
-            if ($unit === '' || ! preg_match('/^[a-z0-9._-]{1,20}$/i', $unit)) {
-                $rowErrors[] = 'Unit is invalid';
-            }
+
             $normalisedName = mb_strtolower($name);
+            $normalisedCode = mb_strtolower($code);
+            $skipReasons = [];
             if (isset($existingNames[$normalisedName])) {
-                $rowErrors[] = 'Product already exists';
+                $skipReasons[] = 'product name already exists';
+            }
+            if ($code !== '' && isset($existingCodes[$normalisedCode])) {
+                $skipReasons[] = 'product code already exists';
             }
             if (isset($seenNames[$normalisedName])) {
-                $rowErrors[] = 'Duplicate product name in this file';
+                $skipReasons[] = 'duplicate product name in this spreadsheet';
             }
-            if ($code !== '' && isset($existingCodes[mb_strtolower($code)])) {
-                $rowErrors[] = 'Product Code already exists';
+            if ($code !== '' && isset($seenCodes[$normalisedCode])) {
+                $skipReasons[] = 'duplicate product code in this spreadsheet';
             }
-            if ($code !== '' && isset($seenCodes[mb_strtolower($code)])) {
-                $rowErrors[] = 'Duplicate Product Code in this file';
+            if ($skipReasons !== []) {
+                $skipped[] = [
+                    'line' => $line,
+                    'name' => $name,
+                    'product_code' => $code,
+                    'reason' => implode('; ', array_unique($skipReasons)),
+                ];
+
+                continue;
+            }
+
+            if (! is_numeric($tare) || (float) $tare < 0) {
+                $rowErrors[] = 'Tare Weight must be zero or a positive number';
+            }
+            if (! preg_match('/^[a-z0-9._-]{1,20}$/i', $unit)) {
+                $rowErrors[] = 'Unit is invalid';
             }
 
             if ($rowErrors !== []) {
@@ -469,11 +533,11 @@ trait AdminDataExchange
             $seenCodes[mb_strtolower($code)] = true;
         }
 
-        if ($records === [] && $errors === []) {
+        if ($records === [] && $skipped === [] && $errors === []) {
             $errors[] = 'The spreadsheet contains no product rows.';
         }
 
-        return ['type' => 'products', 'records' => $records, 'errors' => $errors];
+        return ['type' => 'products', 'records' => $records, 'skipped' => $skipped, 'errors' => $errors];
     }
 
     private function buildProductDetailPreview(array $headers, array $rows): array

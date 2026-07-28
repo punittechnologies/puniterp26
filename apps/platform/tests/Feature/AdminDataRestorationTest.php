@@ -27,7 +27,8 @@ class AdminDataRestorationTest extends TestCase
             ->assertOk()
             ->assertSee('Import Centre')
             ->assertSee('Product Spreadsheet')
-            ->assertSee('Product Details Spreadsheet');
+            ->assertSee('Product Details Spreadsheet')
+            ->assertSee('Export Current Products');
         $this->actingAs($admin)->get('/export')
             ->assertOk()
             ->assertSee('Export Centre');
@@ -70,7 +71,7 @@ class AdminDataRestorationTest extends TestCase
         ]);
     }
 
-    public function test_product_import_rejects_existing_products_without_overwriting(): void
+    public function test_product_import_skips_existing_rows_and_imports_only_new_products(): void
     {
         [$tenant, $admin] = $this->adminUser();
         Product::query()->create([
@@ -84,24 +85,93 @@ class AdminDataRestorationTest extends TestCase
         $this->actingAs($admin)->post('/import/products', [
             'file' => UploadedFile::fake()->createWithContent(
                 'products.csv',
-                "Product Name,Product Code,Tare Weight,Unit\nReplacement,WID-001,0.125,kg\n",
+                "Product Name,Product Code,Tare Weight,Unit,Extra Column\n".
+                "Existing Widget,WID-001,99,kg,ignored\n".
+                "New Widget,NEW-001,,,ignored\n".
+                "New Widget,NEW-001,5,kg,ignored\n",
             ),
         ])->assertRedirect('/import');
 
         $this->actingAs($admin)->get('/import')
-            ->assertSee('Product Code already exists');
+            ->assertOk()
+            ->assertSee('1 new')
+            ->assertSee('2 skipped')
+            ->assertSee('Existing or duplicate rows will be skipped')
+            ->assertSee('New Widget')
+            ->assertSee('0.000')
+            ->assertSee('kg')
+            ->assertSee('Confirm Product Import')
+            ->assertDontSee('New-product import blocked');
         $this->actingAs($admin)->post('/import/products', ['confirm' => '1'])
-            ->assertSessionHasErrors('file');
+            ->assertRedirect('/import')
+            ->assertSessionHasNoErrors()
+            ->assertSessionHas('status', 'Product import completed. Created 1 new products; skipped 2 existing or duplicate rows.');
         $this->assertDatabaseHas('products', [
             'tenant_id' => $tenant->id,
             'name' => 'Existing Widget',
             'product_code' => 'WID-001',
             'default_tare_weight' => 9,
         ]);
-        $this->assertDatabaseMissing('products', [
+        $this->assertDatabaseHas('products', [
             'tenant_id' => $tenant->id,
-            'name' => 'Replacement',
+            'name' => 'New Widget',
+            'product_code' => 'NEW-001',
+            'default_tare_weight' => 0,
         ]);
+    }
+
+    public function test_product_import_only_requires_product_name_and_ignores_extra_columns(): void
+    {
+        [$tenant, $admin] = $this->adminUser();
+
+        $this->actingAs($admin)->post('/import/products', [
+            'file' => UploadedFile::fake()->createWithContent(
+                'products.csv',
+                "Product Name,Notes,Unused Value\nWidget,keep this outside import,123\n",
+            ),
+        ])->assertRedirect('/import');
+        $this->actingAs($admin)->get('/import')
+            ->assertOk()
+            ->assertSee('1 new')
+            ->assertSee('0.000')
+            ->assertSee('kg')
+            ->assertSee('Confirm Product Import');
+        $this->actingAs($admin)->post('/import/products', ['confirm' => '1'])
+            ->assertRedirect('/import');
+
+        $product = Product::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('name', 'Widget')
+            ->firstOrFail();
+        $this->assertSame(0.0, (float) $product->default_tare_weight);
+        $this->assertSame('kg', $product->defaultWeightUnit?->symbol);
+    }
+
+    public function test_product_export_is_import_compatible_and_existing_rows_are_skipped(): void
+    {
+        [$tenant, $admin] = $this->adminUser();
+        $this->product($tenant, 'Exported Product', 'EXP-001');
+        $otherTenant = Tenant::query()->create([
+            'name' => 'Other Tenant',
+            'code' => 'EXPORT-OTHER',
+            'status' => 'active',
+        ]);
+        $this->product($otherTenant, 'Hidden Product', 'HIDDEN-001');
+
+        $export = $this->actingAs($admin)->get('/import/products/export');
+        $export->assertOk()
+            ->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+
+        $upload = UploadedFile::fake()->createWithContent('products-export.xlsx', $export->getContent());
+        $this->actingAs($admin)->post('/import/products', ['file' => $upload])
+            ->assertRedirect('/import');
+        $this->actingAs($admin)->get('/import')
+            ->assertOk()
+            ->assertSee('0 new')
+            ->assertSee('1 skipped')
+            ->assertSee('Exported Product')
+            ->assertDontSee('Hidden Product')
+            ->assertDontSee('New-product import blocked');
     }
 
     public function test_generated_excel_template_can_be_uploaded_and_previewed(): void
