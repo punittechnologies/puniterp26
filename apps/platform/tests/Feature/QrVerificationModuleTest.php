@@ -62,7 +62,11 @@ class QrVerificationModuleTest extends TestCase
             ->assertSee('Original product manufactured by SIMIC Electronics.')
             ->assertSee('DM19C3')
             ->assertSee('0.400 kg')
-            ->assertSee('5');
+            ->assertSee('5')
+            ->assertSee('VERIFIED THROUGH PUNIT ERP')
+            ->assertSee('Product record securely verified')
+            ->assertSee('Real-time weighing &amp; labelling intelligence', false)
+            ->assertSee('https://puniterp.com');
 
         $same = $this->withToken($token)
             ->withHeader('X-Tenant-Id', $tenant->id)
