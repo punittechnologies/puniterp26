@@ -205,7 +205,7 @@ void main() {
     );
   });
 
-  test('TVS native path leaves QR and final print to the vendor SDK', () {
+  test('TVS native path sends the proven direct TSPL QR command', () {
     final adapter = BluetoothThermalPrinterAdapter(qrPrintingEnabled: true);
     const job = PrintJob(
       jobId: 'job-native-secure-qr',
@@ -239,8 +239,9 @@ void main() {
 
     expect(nativeTspl, contains('BARCODE '));
     expect(nativeTspl, isNot(contains('BITMAP ')));
-    expect(nativeTspl, isNot(contains('QRCODE ')));
-    expect(nativeTspl, isNot(contains('PRINT 1,1')));
+    expect(nativeTspl, contains('QRCODE '));
+    expect(nativeTspl, contains('/verify/'));
+    expect(nativeTspl, contains('PRINT 1,1'));
     expect(qrSpec, isNotNull);
     expect(qrSpec!['value'], contains('/verify/'));
     expect(qrSpec['cellWidth'], inInclusiveRange(2, 8));
