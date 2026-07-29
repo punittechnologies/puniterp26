@@ -131,6 +131,14 @@
             </div>
 
             <div class="label-tool-section">
+                <h4>Barcodes</h4>
+                <div class="label-tool-group">
+                    <button type="button" x-on:click="addCustomerBarcode()">Product customer SKU / GTIN</button>
+                </div>
+                <small>Optional. It prints automatically from the selected product and disappears completely when that product has no customer barcode.</small>
+            </div>
+
+            <div class="label-tool-section">
                 <h4>Verification</h4>
                 <div class="label-tool-group">
                     <button type="button" x-on:click="addQr()">Secure QR verification</button>
@@ -158,8 +166,8 @@
             </div>
 
             <div class="label-barcode-note">
-                <strong>Barcode is mandatory</strong>
-                <span>You can move and resize it, but it cannot be removed.</span>
+                <strong>Inventory barcode is mandatory</strong>
+                <span>The existing inventory barcode stays unchanged. The product customer barcode is optional.</span>
             </div>
         </aside>
 
@@ -205,7 +213,7 @@
             <div class="label-format-form" x-show="selectedElement">
                 <div class="label-selected-name">
                     <span>Selected</span>
-                    <strong x-text="selectedElement?.type === 'barcode' ? 'Mandatory barcode' : (selectedElement?.type === 'qr' ? 'Secure QR verification' : (selectedElement?.bindingKey || selectedElement?.text || selectedElement?.type))"></strong>
+                    <strong x-text="selectedElement?.type === 'barcode' ? (selectedElement?.bindingKey === 'product.customer_barcode' ? 'Product customer barcode' : 'Internal inventory barcode') : (selectedElement?.type === 'qr' ? 'Secure QR verification' : (selectedElement?.bindingKey || selectedElement?.text || selectedElement?.type))"></strong>
                 </div>
 
                 <label x-show="selectedElement?.type === 'text'">
@@ -231,6 +239,30 @@
                     <p x-show="selectedElement?.type === 'binding_text'" class="label-preview-value-note">
                         Preview uses sample value: <strong x-text="selectedElement?.previewValue || previewValueForBinding(selectedElement?.bindingKey, selectedElement?.text)"></strong>
                     </p>
+                </div>
+
+                <div class="label-prefix-focus" x-show="selectedElement?.type === 'barcode'">
+                    <div class="label-binding-note">
+                        <strong x-text="selectedElement?.bindingKey === 'product.customer_barcode' ? 'Automatically uses the selected product customer barcode' : 'Automatically uses the unique inventory barcode'"></strong>
+                        <span>Binding: <code x-text="selectedElement?.bindingKey || 'barcode.value'"></code></span>
+                        <small x-show="selectedElement?.bindingKey === 'product.customer_barcode'">If the product has no customer barcode, this entire element is skipped and printing continues.</small>
+                    </div>
+                    <label>
+                        <span>Caption override</span>
+                        <input placeholder="Blank uses product caption" x-model="selectedElement.caption" x-on:change="updateSelected('caption', selectedElement.caption || '')">
+                    </label>
+                    <label>
+                        <span>Caption position</span>
+                        <select x-model="selectedElement.captionPosition" x-on:change="updateSelected('captionPosition', selectedElement.captionPosition)">
+                            <option value="none">Do not print caption</option>
+                            <option value="top">Above barcode</option>
+                            <option value="bottom">Below barcode</option>
+                        </select>
+                    </label>
+                    <label class="label-check">
+                        <input type="checkbox" x-model="selectedElement.showValue" x-on:change="updateSelected('showValue', selectedElement.showValue)">
+                        <span>Print barcode value</span>
+                    </label>
                 </div>
 
                 <div class="label-field-editor-title">
@@ -354,7 +386,7 @@
                     <input type="number" step="1" x-model.number="selectedElement.rotation" x-on:change="updateSelected('rotation', selectedElement.rotation)">
                 </label>
 
-                <button type="button" class="label-delete-button" x-on:click="remove()" x-bind:disabled="selectedElement?.type === 'barcode'">
+                <button type="button" class="label-delete-button" x-on:click="remove()" x-bind:disabled="selectedElement?.type === 'barcode' && (selectedElement?.bindingKey || 'barcode.value') === 'barcode.value'">
                     Delete selected
                 </button>
             </div>

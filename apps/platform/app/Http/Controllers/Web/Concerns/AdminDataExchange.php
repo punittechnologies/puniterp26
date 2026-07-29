@@ -7,6 +7,7 @@ use App\Models\ProductConfiguration\DynamicFieldDefinition;
 use App\Models\ProductConfiguration\Product;
 use App\Models\ProductConfiguration\ProductVariant;
 use App\Models\ProductConfiguration\Unit;
+use App\Support\ProductCustomerBarcode;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
@@ -38,6 +39,7 @@ trait AdminDataExchange
                 ->get(),
             'productPreview' => session($this->importPreviewKey('products')),
             'detailPreview' => session($this->importPreviewKey('product-details')),
+            'customerBarcodeTypes' => ProductCustomerBarcode::TYPES,
         ]);
     }
 
@@ -56,9 +58,9 @@ trait AdminDataExchange
 
         $rows = $type === 'products'
             ? [
-                ['Product Name', 'Product Code', 'Tare Weight', 'Unit'],
-                ['Printer', 'PRINTER-001', '0.000', 'kg'],
-                ['Scanner', 'SCANNER-001', '0.200', 'kg'],
+                ['Product Name', 'Product Code', 'Tare Weight', 'Unit', 'Customer Barcode Enabled', 'Customer Barcode Type', 'Customer Barcode', 'Customer Barcode Caption'],
+                ['Printer', 'PRINTER-001', '0.000', 'kg', 'Yes', 'code128', 'CUSTOMER-PRINTER-001', 'CUSTOMER SKU'],
+                ['Scanner', 'SCANNER-001', '0.200', 'kg', 'No', '', '', ''],
             ]
             : [
                 $headers = $fields ?: ['Color', 'Size'],
@@ -92,11 +94,15 @@ trait AdminDataExchange
                 $product->product_code ?? '',
                 number_format((float) ($product->default_tare_weight ?? 0), 3, '.', ''),
                 $product->defaultWeightUnit?->symbol ?: 'kg',
+                $product->customer_barcode_enabled ? 'Yes' : 'No',
+                $product->customer_barcode_type ?? '',
+                $product->customer_barcode_value ?? '',
+                $product->customer_barcode_caption ?? '',
             ])
             ->all();
 
         return response($this->xlsxWorkbook('Products', [
-            ['Product Name', 'Product Code', 'Tare Weight', 'Unit'],
+            ['Product Name', 'Product Code', 'Tare Weight', 'Unit', 'Customer Barcode Enabled', 'Customer Barcode Type', 'Customer Barcode', 'Customer Barcode Caption'],
             ...$rows,
         ]), 200, [
             'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -162,6 +168,10 @@ trait AdminDataExchange
                         'product_code' => $record['product_code'],
                         'default_tare_weight' => $record['tare_weight'],
                         'default_weight_unit_id' => $unit->id,
+                        'customer_barcode_enabled' => $record['customer_barcode_enabled'],
+                        'customer_barcode_type' => $record['customer_barcode_type'],
+                        'customer_barcode_value' => $record['customer_barcode_value'],
+                        'customer_barcode_caption' => $record['customer_barcode_caption'],
                         'is_active' => true,
                         'weight_decimal_precision' => 3,
                         'manual_print_enabled' => true,
@@ -470,6 +480,21 @@ trait AdminDataExchange
             $code = strtoupper(trim((string) ($record['productcode'] ?? '')));
             $tare = trim((string) ($record['tareweight'] ?? '0'));
             $unit = strtolower(trim((string) ($record['unit'] ?? 'kg')));
+            $customerBarcodeEnabledRaw = strtolower(trim((string) ($record['customerbarcodeenabled'] ?? '')));
+            $customerBarcodeValue = trim((string) ($record['customerbarcode'] ?? ''));
+            $customerBarcodeEnabled = in_array($customerBarcodeEnabledRaw, ['1', 'yes', 'y', 'true', 'enabled'], true)
+                || ($customerBarcodeEnabledRaw === '' && $customerBarcodeValue !== '');
+            $customerBarcodeTypeRaw = strtolower(trim((string) ($record['customerbarcodetype'] ?? 'code128')));
+            $customerBarcodeType = collect(ProductCustomerBarcode::TYPES)
+                ->search(fn (string $label, string $key): bool => in_array(
+                    $customerBarcodeTypeRaw,
+                    [strtolower($key), strtolower($label)],
+                    true,
+                ));
+            $customerBarcodeType = is_string($customerBarcodeType)
+                ? $customerBarcodeType
+                : $customerBarcodeTypeRaw;
+            $customerBarcodeCaption = trim((string) ($record['customerbarcodecaption'] ?? ''));
             $tare = $tare === '' ? '0' : $tare;
             $unit = $unit === '' ? 'kg' : $unit;
             $rowErrors = [];
@@ -515,6 +540,12 @@ trait AdminDataExchange
             if (! preg_match('/^[a-z0-9._-]{1,20}$/i', $unit)) {
                 $rowErrors[] = 'Unit is invalid';
             }
+            if ($customerBarcodeEnabled) {
+                $message = ProductCustomerBarcode::validationMessage($customerBarcodeType, $customerBarcodeValue);
+                if ($message) {
+                    $rowErrors[] = $message;
+                }
+            }
 
             if ($rowErrors !== []) {
                 $errors[] = 'Row '.$line.': '.implode('; ', $rowErrors);
@@ -528,6 +559,12 @@ trait AdminDataExchange
                 'product_code' => $code,
                 'tare_weight' => round((float) $tare, 6),
                 'unit' => $unit,
+                'customer_barcode_enabled' => $customerBarcodeEnabled,
+                'customer_barcode_type' => $customerBarcodeEnabled ? $customerBarcodeType : null,
+                'customer_barcode_value' => $customerBarcodeEnabled ? $customerBarcodeValue : null,
+                'customer_barcode_caption' => $customerBarcodeEnabled
+                    ? ($customerBarcodeCaption !== '' ? $customerBarcodeCaption : 'CUSTOMER SKU')
+                    : null,
             ];
             $seenNames[$normalisedName] = true;
             $seenCodes[mb_strtolower($code)] = true;

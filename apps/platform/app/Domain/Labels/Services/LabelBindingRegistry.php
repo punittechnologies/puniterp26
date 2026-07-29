@@ -21,6 +21,7 @@ class LabelBindingRegistry
             ['key' => 'batch.number', 'label' => 'Batch No', 'type' => 'product'],
             ['key' => 'serial.number', 'label' => 'Serial number', 'type' => 'system'],
             ['key' => 'barcode.value', 'label' => 'Barcode', 'type' => 'barcode'],
+            ['key' => 'product.customer_barcode', 'label' => 'Product customer barcode', 'type' => 'barcode'],
             ['key' => 'qr.value', 'label' => 'QR code', 'type' => 'qr'],
             ['key' => 'date.current', 'label' => 'Date', 'type' => 'system'],
             ['key' => 'time.current', 'label' => 'Time', 'type' => 'system'],

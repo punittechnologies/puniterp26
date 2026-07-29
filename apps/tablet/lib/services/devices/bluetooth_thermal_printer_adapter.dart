@@ -455,7 +455,7 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
   Future<PrintResult> _printNative(PrintJob job) async {
     try {
       final response = await _tvsChannel.invokeMethod<Map<dynamic, dynamic>>(
-        'printRawTsplBytes',
+        'printRawTsplBytesReliable',
         {'bytes': _tsplBytes(job, renderQrAsCommand: _qrEnabledFor(job))},
       );
       final ok = response?['ok'] == true;
@@ -932,31 +932,111 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
       }
 
       if (type == 'barcode') {
-        hasBarcode = true;
-        final barcode = _clean(
-          data['barcode_value'],
-        ).ifEmpty(_clean(data['serial_number']).ifEmpty('PREVIEW'));
-        final barcodeLayout = _barcodeLayout(element, barcode);
-        lines.add(
-          'BARCODE ${barcodeLayout.x},${_dots(element['y'])},"128",'
-          '${_dots(element['height']).clamp(28, 72)},0,0,'
-          '${barcodeLayout.moduleWidth},${barcodeLayout.moduleWidth},'
-          '"${_limit(barcode, 28)}"',
-        );
-        final valueFontSize = 8;
-        final value = _limit(barcode, 24);
-        lines.add(
-          _text(
-            _alignedX(element, value, valueFontSize, 'center', ''),
-            _dots(
-              (_num(element['y']) ?? 0) + (_num(element['height']) ?? 16) + 1,
+        final bindingKey = element['bindingKey']?.toString() ?? 'barcode.value';
+        final isCustomer = bindingKey == 'product.customer_barcode';
+        final barcode = isCustomer
+            ? (_truthy(data['customer_barcode_enabled'])
+                  ? _clean(data['customer_barcode_value'])
+                  : '')
+            : _clean(
+                data['barcode_value'],
+              ).ifEmpty(_clean(data['serial_number']).ifEmpty('PREVIEW'));
+        if (barcode.isEmpty) {
+          continue;
+        }
+        final barcodeType = isCustomer
+            ? _clean(
+                data['customer_barcode_type'],
+              ).toLowerCase().ifEmpty('code128')
+            : 'code128';
+        final tsplType = _tsplBarcodeType(barcodeType);
+        if (tsplType == null || !_validBarcodeValue(barcodeType, barcode)) {
+          // Customer barcodes are optional and must never block the inventory
+          // label. Invalid customer data is omitted; the inventory barcode
+          // and remaining label fields continue printing.
+          if (isCustomer) {
+            continue;
+          }
+        }
+        if (!isCustomer) {
+          hasBarcode = true;
+        }
+        final captionOverride = _clean(element['caption']);
+        final caption = captionOverride.isNotEmpty
+            ? captionOverride
+            : (isCustomer ? _clean(data['customer_barcode_caption']) : '');
+        final captionPosition = _clean(
+          element['captionPosition'],
+        ).toLowerCase().ifEmpty(caption.isEmpty ? 'none' : 'top');
+        final showValue = element['showValue'] == null
+            ? true
+            : _truthy(element['showValue']);
+        final enhancedLayout =
+            caption.isNotEmpty ||
+            element.containsKey('captionPosition') ||
+            element.containsKey('showValue') ||
+            isCustomer;
+        final yMm = _num(element['y']) ?? 0;
+        final heightMm = _num(element['height']) ?? 16;
+        final topCaptionMm = caption.isNotEmpty && captionPosition == 'top'
+            ? 3.5
+            : 0.0;
+        final bottomCaptionMm =
+            caption.isNotEmpty && captionPosition == 'bottom' ? 3.5 : 0.0;
+        final valueMm = showValue ? 3.5 : 0.0;
+        final barY = enhancedLayout ? yMm + topCaptionMm : yMm;
+        final barHeightMm = enhancedLayout
+            ? (heightMm - topCaptionMm - bottomCaptionMm - valueMm).clamp(
+                4.0,
+                heightMm,
+              )
+            : heightMm;
+        final barcodeLayout = _barcodeLayout(element, barcode, barcodeType);
+        if (caption.isNotEmpty && captionPosition == 'top') {
+          lines.add(
+            _text(
+              _alignedX(element, caption, 7, 'center', ''),
+              _dots(yMm),
+              '1',
+              1,
+              1,
+              _limit(caption, 48),
             ),
-            '1',
-            1,
-            1,
-            _limit(barcode, 24),
-          ),
+          );
+        }
+        lines.add(
+          'BARCODE ${barcodeLayout.x},${_dots(barY)},"${tsplType ?? '128'}",'
+          '${_dots(barHeightMm).clamp(28, enhancedLayout ? 120 : 72)},0,0,'
+          '${barcodeLayout.moduleWidth},${barcodeLayout.moduleWidth},'
+          '"${enhancedLayout ? _escape(barcode) : _limit(barcode, 28)}"',
         );
+        if (caption.isNotEmpty && captionPosition == 'bottom') {
+          lines.add(
+            _text(
+              _alignedX(element, caption, 7, 'center', ''),
+              _dots(yMm + heightMm - valueMm - bottomCaptionMm),
+              '1',
+              1,
+              1,
+              _limit(caption, 48),
+            ),
+          );
+        }
+        if (showValue) {
+          final value = _limit(barcode, enhancedLayout ? 48 : 24);
+          lines.add(
+            _text(
+              _alignedX(element, value, 8, 'center', ''),
+              _dots(
+                enhancedLayout ? yMm + heightMm - valueMm : yMm + heightMm + 1,
+              ),
+              '1',
+              1,
+              1,
+              value,
+            ),
+          );
+        }
         continue;
       }
 
@@ -1184,6 +1264,10 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
       ).ifEmpty(_dynamicValue('dynamic.batch', data)),
       'serial.number' => _clean(data['serial_number']),
       'barcode.value' => _clean(data['barcode_value']),
+      'product.customer_barcode' =>
+        _truthy(data['customer_barcode_enabled'])
+            ? _clean(data['customer_barcode_value'])
+            : '',
       'qr.value' => _clean(data['qr_value']),
       'date.current' => DateTime.now().toIso8601String().substring(0, 10),
       'time.current' => DateTime.now().toIso8601String().substring(11, 16),
@@ -1250,10 +1334,14 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
     return x + (spare ~/ 2);
   }
 
-  _BarcodeLayout _barcodeLayout(Map element, String value) {
+  _BarcodeLayout _barcodeLayout(
+    Map element,
+    String value, [
+    String type = 'code128',
+  ]) {
     final boxX = _dots(element['x']);
     final boxWidth = _dots(element['width']).clamp(1, 832);
-    final modules = _estimatedCode128Modules(_limit(value, 28));
+    final modules = _estimatedBarcodeModules(type, value);
     final moduleWidth = (boxWidth ~/ modules).clamp(1, 2);
     final printedWidth = modules * moduleWidth;
     final x = boxX + ((boxWidth - printedWidth).clamp(0, boxWidth) ~/ 2);
@@ -1266,6 +1354,54 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
     // barcode slightly narrower; this conservative estimate keeps it inside and
     // centred within the web-designed element box.
     return (11 * (value.length + 2)) + 13 + 20;
+  }
+
+  int _estimatedBarcodeModules(String type, String value) {
+    return switch (type) {
+      'ean13' || 'upca' => 115,
+      'ean8' => 87,
+      'itf14' => 155,
+      'code39' => (13 * value.length) + 45,
+      _ => _estimatedCode128Modules(value),
+    };
+  }
+
+  String? _tsplBarcodeType(String type) {
+    return switch (type) {
+      'code128' => '128',
+      'ean13' => 'EAN13',
+      'ean8' => 'EAN8',
+      'upca' => 'UPCA',
+      'code39' => '39',
+      'itf14' => 'ITF14',
+      _ => null,
+    };
+  }
+
+  bool _validBarcodeValue(String type, String value) {
+    return switch (type) {
+      'ean13' => RegExp(r'^\d{13}$').hasMatch(value),
+      'ean8' => RegExp(r'^\d{8}$').hasMatch(value),
+      'upca' => RegExp(r'^\d{12}$').hasMatch(value),
+      'itf14' => RegExp(r'^\d{14}$').hasMatch(value),
+      'code39' =>
+        value.length <= 32 && RegExp(r'^[0-9A-Z .$/+%\-]+$').hasMatch(value),
+      'code128' =>
+        value.length <= 48 && RegExp(r'^[\x20-\x7E]+$').hasMatch(value),
+      _ => false,
+    };
+  }
+
+  bool _truthy(Object? value) {
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    return const {
+      '1',
+      'true',
+      'yes',
+      'y',
+      'enabled',
+    }.contains(value?.toString().trim().toLowerCase());
   }
 
   _BitmapTspl? _imageBitmapTspl(Map element) {

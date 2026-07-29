@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-#[Fillable(['tenant_id', 'category_id', 'default_weight_unit_id', 'default_inventory_unit_id', 'default_warehouse_id', 'name', 'product_code', 'sku', 'description', 'brand', 'image_path', 'is_active', 'barcode_rule', 'default_tare_weight', 'minimum_weight', 'maximum_weight', 'target_weight', 'weight_decimal_precision', 'stability_duration_ms', 'stability_tolerance', 'reset_threshold', 'auto_print_enabled', 'manual_print_enabled', 'duplicate_print_prevention_enabled', 'unit_conversion_enabled', 'default_label_template_id', 'product_lock_mode', 'variant_lock_mode', 'product_selection_mode', 'metadata', 'configuration_version', 'configuration_activated_at', 'created_by', 'updated_by'])]
+#[Fillable(['tenant_id', 'category_id', 'default_weight_unit_id', 'default_inventory_unit_id', 'default_warehouse_id', 'name', 'product_code', 'sku', 'description', 'brand', 'image_path', 'is_active', 'barcode_rule', 'customer_barcode_enabled', 'customer_barcode_type', 'customer_barcode_value', 'customer_barcode_caption', 'default_tare_weight', 'minimum_weight', 'maximum_weight', 'target_weight', 'weight_decimal_precision', 'stability_duration_ms', 'stability_tolerance', 'reset_threshold', 'auto_print_enabled', 'manual_print_enabled', 'duplicate_print_prevention_enabled', 'unit_conversion_enabled', 'default_label_template_id', 'product_lock_mode', 'variant_lock_mode', 'product_selection_mode', 'metadata', 'configuration_version', 'configuration_activated_at', 'created_by', 'updated_by'])]
 class Product extends Model
 {
     use HasUuidPrimaryKey, SoftDeletes;
@@ -20,6 +20,7 @@ class Product extends Model
     {
         return [
             'is_active' => 'boolean',
+            'customer_barcode_enabled' => 'boolean',
             'default_tare_weight' => NullableDecimal::class.':3',
             'minimum_weight' => NullableDecimal::class.':3',
             'maximum_weight' => NullableDecimal::class.':3',

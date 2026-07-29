@@ -40,6 +40,82 @@ class PhaseTwoProductTest extends TestCase
         ])->assertUnprocessable();
     }
 
+    public function test_product_customer_barcode_is_optional_validated_and_synced(): void
+    {
+        [$tenant, $token] = $this->tenantToken();
+
+        $this->withToken($token)->withHeader('X-Tenant-Id', $tenant->id)->postJson('/api/v1/products', [
+            'name' => 'Customer Packed Coil',
+            'product_code' => 'CUSTOMER-COIL',
+            'customer_barcode_enabled' => true,
+            'customer_barcode_type' => 'ean13',
+            'customer_barcode_value' => '4006381333931',
+            'customer_barcode_caption' => 'CUSTOMER GTIN',
+        ])->assertCreated()
+            ->assertJsonPath('data.customer_barcode_enabled', true)
+            ->assertJsonPath('data.customer_barcode_value', '4006381333931');
+
+        $this->withToken($token)
+            ->withHeader('X-Tenant-Id', $tenant->id)
+            ->getJson('/api/v1/sync/products')
+            ->assertOk()
+            ->assertJsonPath('products.0.customer_barcode_type', 'ean13')
+            ->assertJsonPath('products.0.customer_barcode_caption', 'CUSTOMER GTIN');
+
+        $this->withToken($token)->withHeader('X-Tenant-Id', $tenant->id)->postJson('/api/v1/products', [
+            'name' => 'Invalid Customer Code',
+            'product_code' => 'INVALID-CUSTOMER-CODE',
+            'customer_barcode_enabled' => true,
+            'customer_barcode_type' => 'ean13',
+            'customer_barcode_value' => '123',
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors('customer_barcode_value');
+
+        $this->withToken($token)->withHeader('X-Tenant-Id', $tenant->id)->postJson('/api/v1/products', [
+            'name' => 'No Customer Code',
+            'product_code' => 'NO-CUSTOMER-CODE',
+            'customer_barcode_enabled' => false,
+        ])->assertCreated();
+    }
+
+    public function test_web_product_checkbox_controls_customer_barcode_fields(): void
+    {
+        $tenant = Tenant::query()->create(['name' => 'Tenant', 'code' => fake()->unique()->lexify('TEN???'), 'status' => 'active']);
+        $user = User::query()->create([
+            'tenant_id' => $tenant->id,
+            'name' => 'Admin',
+            'email' => fake()->unique()->safeEmail(),
+            'password' => Hash::make('password'),
+            'is_active' => true,
+        ]);
+
+        $this->actingAs($user);
+
+        Livewire::test(ProductManager::class)
+            ->set('form.name', 'Barcode Product')
+            ->set('hasCustomerBarcode', true)
+            ->set('form.customer_barcode_type', 'code128')
+            ->set('form.customer_barcode_value', 'CUSTOMER-SKU-01')
+            ->set('form.customer_barcode_caption', 'Customer SKU')
+            ->call('saveProduct')
+            ->assertHasNoErrors();
+
+        $product = Product::query()->where('tenant_id', $tenant->id)->firstOrFail();
+        $this->assertTrue($product->customer_barcode_enabled);
+        $this->assertSame('CUSTOMER-SKU-01', $product->customer_barcode_value);
+
+        Livewire::test(ProductManager::class)
+            ->call('editProduct', $product->id)
+            ->set('hasCustomerBarcode', false)
+            ->call('saveProduct')
+            ->assertHasNoErrors();
+
+        $product->refresh();
+        $this->assertFalse($product->customer_barcode_enabled);
+        $this->assertNull($product->customer_barcode_type);
+        $this->assertNull($product->customer_barcode_value);
+    }
+
     public function test_web_product_can_be_recreated_after_delete_with_same_name(): void
     {
         $tenant = Tenant::query()->create(['name' => 'Tenant', 'code' => fake()->unique()->lexify('TEN???'), 'status' => 'active']);

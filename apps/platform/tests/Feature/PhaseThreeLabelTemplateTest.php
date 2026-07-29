@@ -11,6 +11,7 @@ use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 class PhaseThreeLabelTemplateTest extends TestCase
@@ -61,6 +62,44 @@ class PhaseThreeLabelTemplateTest extends TestCase
 
         $this->assertSame('v1', $rolledBack->template_json['elements'][0]['text']);
         $this->assertSame(3, $rolledBack->active_version);
+    }
+
+    public function test_label_allows_one_inventory_and_one_optional_customer_barcode(): void
+    {
+        $tenant = Tenant::query()->create(['name' => 'Tenant', 'code' => 'BARCODE-TENANT', 'status' => 'active']);
+        $service = app(LabelTemplateService::class);
+        $template = $this->templateJson();
+        $template['elements'] = [
+            ['key' => 'inventory', 'type' => 'barcode', 'bindingKey' => 'barcode.value', 'x' => 5, 'y' => 5, 'width' => 60, 'height' => 15],
+            ['key' => 'customer', 'type' => 'barcode', 'bindingKey' => 'product.customer_barcode', 'x' => 5, 'y' => 25, 'width' => 60, 'height' => 15],
+        ];
+
+        $saved = $service->create([
+            'name' => 'Dual Barcode',
+            'code' => 'DUAL-BARCODE',
+            'scope' => 'tenant',
+            'template_json' => $template,
+        ], $tenant->id);
+
+        $this->assertCount(2, $saved->template_json['elements']);
+
+        $template['elements'][] = [
+            'key' => 'customer-duplicate',
+            'type' => 'barcode',
+            'bindingKey' => 'product.customer_barcode',
+            'x' => 5,
+            'y' => 45,
+            'width' => 60,
+            'height' => 15,
+        ];
+
+        $this->expectException(ValidationException::class);
+        $service->create([
+            'name' => 'Invalid Dual Barcode',
+            'code' => 'INVALID-DUAL',
+            'scope' => 'tenant',
+            'template_json' => $template,
+        ], $tenant->id);
     }
 
     private function tenantToken(): array

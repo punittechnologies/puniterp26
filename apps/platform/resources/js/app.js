@@ -135,12 +135,25 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
             } else if (element.type === 'barcode') {
                 node = new Konva.Group({ x: attrs.x, y: attrs.y, width: attrs.width, height: attrs.height, draggable: true, rotation: attrs.rotation, name: element.key });
                 node.add(new Konva.Rect({ x: 0, y: 0, width: attrs.width, height: attrs.height, stroke: '#111827', fill: '#f8fafc' }));
+                const isCustomer = element.bindingKey === 'product.customer_barcode';
+                const caption = String(element.caption || (isCustomer ? 'CUSTOMER SKU' : '')).trim();
+                const captionPosition = element.captionPosition || (caption ? 'top' : 'none');
+                const captionHeight = caption && captionPosition !== 'none' ? 10 : 0;
+                if (caption && captionPosition === 'top') {
+                    node.add(new Konva.Text({ x: 3, y: 2, width: attrs.width - 6, text: caption, fontSize: 7, align: 'center', fill: '#0f172a', listening: false }));
+                }
                 const bars = Math.max(10, Math.floor(attrs.width / 6));
                 for (let index = 0; index < bars; index += 1) {
                     const barWidth = index % 3 === 0 ? 3 : 1.5;
-                    node.add(new Konva.Rect({ x: 5 + index * 5, y: 4, width: barWidth, height: Math.max(4, attrs.height - 13), fill: '#111827', listening: false }));
+                    node.add(new Konva.Rect({ x: 5 + index * 5, y: 4 + (captionPosition === 'top' ? captionHeight : 0), width: barWidth, height: Math.max(4, attrs.height - 13 - captionHeight), fill: '#111827', listening: false }));
                 }
-                node.add(new Konva.Text({ x: 4, y: Math.max(2, attrs.height - 9), width: attrs.width - 8, text: 'BARCODE', fontSize: 7, align: 'center', fill: '#334155', listening: false }));
+                const sampleValue = isCustomer ? 'CUSTOMER123' : 'PHK123456';
+                if (element.showValue !== false) {
+                    node.add(new Konva.Text({ x: 4, y: Math.max(2, attrs.height - 9), width: attrs.width - 8, text: sampleValue, fontSize: 7, align: 'center', fill: '#334155', listening: false }));
+                }
+                if (caption && captionPosition === 'bottom') {
+                    node.add(new Konva.Text({ x: 3, y: Math.max(2, attrs.height - (element.showValue === false ? 9 : 17)), width: attrs.width - 6, text: caption, fontSize: 7, align: 'center', fill: '#0f172a', listening: false }));
+                }
             } else if (element.type === 'image') {
                 node = new Konva.Group({ x: attrs.x, y: attrs.y, width: attrs.width, height: attrs.height, draggable: true, rotation: attrs.rotation, name: element.key });
                 node.add(new Konva.Rect({ x: 0, y: 0, width: attrs.width, height: attrs.height, stroke: '#94a3b8', dash: [3, 3], fill: '#fff' }));
@@ -191,6 +204,11 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
                     fontStyle: 'normal',
                     align: 'left',
                 };
+            }
+            if (this.selectedElement?.type === 'barcode') {
+                this.selectedElement.caption ??= '';
+                this.selectedElement.captionPosition ??= this.selectedElement.caption ? 'top' : 'none';
+                this.selectedElement.showValue ??= true;
             }
             const canResize = ['barcode', 'qr', 'image', 'rectangle', 'line'].includes(this.selectedElement?.type);
             this.transformer.resizeEnabled(canResize);
@@ -243,11 +261,26 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
             });
         },
         addBarcode() {
-            if ((this.templateJson.elements || []).some((item) => item.type === 'barcode')) {
+            if ((this.templateJson.elements || []).some((item) => item.type === 'barcode' && (item.bindingKey || 'barcode.value') === 'barcode.value')) {
                 this.warnings = [{ type: 'single_barcode_only' }];
                 return;
             }
             this.addElement({ type: 'barcode', bindingKey: 'barcode.value', width: 45, height: 16 });
+        },
+        addCustomerBarcode() {
+            if ((this.templateJson.elements || []).some((item) => item.type === 'barcode' && item.bindingKey === 'product.customer_barcode')) {
+                this.warnings = [{ type: 'single_customer_barcode_only' }];
+                return;
+            }
+            this.addElement({
+                type: 'barcode',
+                bindingKey: 'product.customer_barcode',
+                caption: '',
+                captionPosition: 'top',
+                showValue: true,
+                width: 45,
+                height: 20,
+            });
         },
         addQr() {
             if ((this.templateJson.elements || []).some((item) => item.type === 'qr')) {
@@ -284,7 +317,7 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
             const original = this.templateJson.elements.find((item) => item.key === this.selected.name());
             if (!original) return;
             if (original.type === 'barcode') {
-                this.warnings = [{ type: 'single_barcode_only' }];
+                this.warnings = [{ type: 'single_barcode_source_only' }];
                 return;
             }
             this.remember();
@@ -295,7 +328,8 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
         },
         remove() {
             if (!this.selected) return;
-            if (this.selected.name() === 'barcode') {
+            if (this.selectedElement?.type === 'barcode'
+                && (this.selectedElement.bindingKey || 'barcode.value') !== 'product.customer_barcode') {
                 this.warnings = [{ type: 'barcode_mandatory' }];
                 return;
             }
@@ -336,8 +370,12 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
             const warnings = (this.templateJson.elements || [])
                 .filter((element) => element.x < 0 || element.y < 0 || element.x + element.width > width || element.y + element.height > height)
                 .map((element) => ({ type: 'out_of_bounds', element: element.key }));
-            if ((this.templateJson.elements || []).filter((element) => element.type === 'barcode').length !== 1) {
+            const barcodes = (this.templateJson.elements || []).filter((element) => element.type === 'barcode');
+            if (barcodes.filter((element) => (element.bindingKey || 'barcode.value') === 'barcode.value').length !== 1) {
                 warnings.push({ type: 'one_barcode_required' });
+            }
+            if (barcodes.filter((element) => element.bindingKey === 'product.customer_barcode').length > 1 || barcodes.length > 2) {
+                warnings.push({ type: 'one_inventory_and_one_customer_barcode_only' });
             }
             if ((this.templateJson.elements || []).filter((element) => element.type === 'qr').length > 1) {
                 warnings.push({ type: 'single_qr_only' });
@@ -400,6 +438,7 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
                 'weight.net': '29.700',
                 'pieces.quantity': '10',
                 'barcode.value': 'PHK123456',
+                'product.customer_barcode': 'CUSTOMER123',
             };
             if (examples[bindingKey]) return examples[bindingKey];
             const cleanLabel = String(label || bindingKey || 'Value')

@@ -147,6 +147,43 @@ class AdminDataRestorationTest extends TestCase
         $this->assertSame('kg', $product->defaultWeightUnit?->symbol);
     }
 
+    public function test_product_import_accepts_optional_customer_barcode_columns(): void
+    {
+        [$tenant, $admin] = $this->adminUser();
+
+        $this->actingAs($admin)->post('/import/products', [
+            'file' => UploadedFile::fake()->createWithContent(
+                'products.csv',
+                "Product Name,Product Code,Customer Barcode Enabled,Customer Barcode Type,Customer Barcode,Customer Barcode Caption\n".
+                "Retail Coil,RETAIL-COIL,Yes,EAN-13 / GTIN-13,4006381333931,Retail GTIN\n".
+                "Internal Coil,INTERNAL-COIL,No,,,\n",
+            ),
+        ])->assertRedirect('/import');
+
+        $this->actingAs($admin)->get('/import')
+            ->assertOk()
+            ->assertSee('4006381333931')
+            ->assertSee('EAN-13 / GTIN-13');
+
+        $this->actingAs($admin)->post('/import/products', ['confirm' => '1'])
+            ->assertRedirect('/import')
+            ->assertSessionHasNoErrors();
+
+        $this->assertDatabaseHas('products', [
+            'tenant_id' => $tenant->id,
+            'product_code' => 'RETAIL-COIL',
+            'customer_barcode_enabled' => true,
+            'customer_barcode_type' => 'ean13',
+            'customer_barcode_value' => '4006381333931',
+        ]);
+        $this->assertDatabaseHas('products', [
+            'tenant_id' => $tenant->id,
+            'product_code' => 'INTERNAL-COIL',
+            'customer_barcode_enabled' => false,
+            'customer_barcode_value' => null,
+        ]);
+    }
+
     public function test_product_export_is_import_compatible_and_existing_rows_are_skipped(): void
     {
         [$tenant, $admin] = $this->adminUser();

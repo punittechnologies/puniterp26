@@ -1352,6 +1352,12 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
             'batch_number': _batchPrintValue(),
             'serial_number': saved.serialNumber,
             'barcode_value': saved.barcodeValue,
+            'customer_barcode_enabled':
+                product.raw['customer_barcode_enabled'] ?? false,
+            'customer_barcode_type':
+                product.raw['customer_barcode_type'] ?? 'code128',
+            'customer_barcode_value': product.raw['customer_barcode_value'],
+            'customer_barcode_caption': product.raw['customer_barcode_caption'],
             'qr_value': qrValue,
             'gross_weight': saved.grossWeight,
             'tare_weight': saved.tareWeight,

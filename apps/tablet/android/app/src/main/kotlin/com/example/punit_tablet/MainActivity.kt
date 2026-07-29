@@ -33,6 +33,8 @@ class MainActivity : FlutterActivity() {
     private var tvsPrinter: LabelPrinter? = null
     private var tvsConnected = false
     private var tvsSdkLoaded = false
+    private var tvsAddress = ""
+    private var tvsLanguage = PRINTER_LANGUAGE_BPLA
     private var tscUsbConnection: UsbDeviceConnection? = null
     private var tscUsbInterface: UsbInterface? = null
     private var tscUsbEndpoint: UsbEndpoint? = null
@@ -79,6 +81,11 @@ class MainActivity : FlutterActivity() {
                     val args = call.arguments as? Map<*, *> ?: emptyMap<String, Any?>()
                     val bytes = args["bytes"] as? ByteArray ?: ByteArray(0)
                     runPrinterIo(result) { tvsPrintRawBytes(bytes) }
+                }
+                "printRawTsplBytesReliable" -> {
+                    val args = call.arguments as? Map<*, *> ?: emptyMap<String, Any?>()
+                    val bytes = args["bytes"] as? ByteArray ?: ByteArray(0)
+                    runPrinterIo(result) { tvsPrintRawBytesReliable(bytes) }
                 }
                 "printRawTsplBytesWithQr" -> {
                     val args = call.arguments as? Map<*, *> ?: emptyMap<String, Any?>()
@@ -408,6 +415,10 @@ class MainActivity : FlutterActivity() {
             val code = printer.ConnectPrinter(PRINTER_PORT_BLUETOOTH, mac, language)
             tvsPrinter = printer
             tvsConnected = code == 0
+            if (tvsConnected) {
+                tvsAddress = mac
+                tvsLanguage = language
+            }
             mapOf(
                 "ok" to tvsConnected,
                 "code" to code,
@@ -518,7 +529,9 @@ class MainActivity : FlutterActivity() {
             // SDK write can report success while the Bluetooth buffer silently
             // drops the tail of the TSPL stream, including PRINT. Send ordered
             // chunks so the complete command reaches the LP 46.
-            val chunkSize = 512
+            // The LP 46 Bluetooth input buffer is small. Larger/faster writes
+            // can return code 0 while dropping the end of image-heavy labels.
+            val chunkSize = 256
             var offset = 0
             var chunks = 0
             while (offset < bytes.size) {
@@ -530,9 +543,9 @@ class MainActivity : FlutterActivity() {
                 }
                 offset = end
                 chunks += 1
-                if (offset < bytes.size) Thread.sleep(20)
+                if (offset < bytes.size) Thread.sleep(35)
             }
-            Thread.sleep(180)
+            Thread.sleep(350)
             printerStatusError(printer)?.let { return it }
 
             mapOf(
@@ -545,6 +558,81 @@ class MainActivity : FlutterActivity() {
         } catch (error: Throwable) {
             mapOf("ok" to false, "code" to -13, "message" to (error.message ?: error.toString()))
         }
+    }
+
+    /**
+     * Production Web Label printing must not trust the cached tvsConnected
+     * Boolean: Android can retain that flag after the Bluetooth socket has
+     * silently gone stale. Re-open the SDK connection immediately before the
+     * job, then transmit conservatively. This prevents the UI from reporting
+     * success merely because bytes were accepted by an old SDK handle.
+     */
+    private fun tvsPrintRawBytesReliable(bytes: ByteArray): Map<String, Any> {
+        if (bytes.isEmpty()) {
+            return mapOf("ok" to false, "code" to -12, "message" to "No label command data was generated.")
+        }
+        if (!hasTrailingPrintCommand(bytes)) {
+            return mapOf(
+                "ok" to false,
+                "code" to -16,
+                "message" to "The generated label is incomplete: final PRINT command is missing."
+            )
+        }
+        if (tvsAddress.isBlank()) {
+            return mapOf(
+                "ok" to false,
+                "code" to -17,
+                "message" to "Saved TVS printer address is missing. Reconnect the printer once."
+            )
+        }
+
+        val reconnect = tvsConnect(tvsAddress, tvsLanguage)
+        if (reconnect["ok"] != true) {
+            return mapOf(
+                "ok" to false,
+                "code" to (reconnect["code"] ?: -18),
+                "message" to "Printer reconnect failed before printing: ${reconnect["message"] ?: "unknown error"}"
+            )
+        }
+
+        val first = tvsPrintRawBytes(bytes)
+        if (first["ok"] == true) {
+            return first + mapOf(
+                "reconnected" to true,
+                "message" to "Label command fully transmitted after a fresh TVS connection."
+            )
+        }
+
+        // Retry only after an explicit SDK/status failure. Never retry an
+        // accepted job, because that could create duplicate physical labels.
+        Thread.sleep(250)
+        val retryConnect = tvsConnect(tvsAddress, tvsLanguage)
+        if (retryConnect["ok"] != true) {
+            return first + mapOf(
+                "message" to "${first["message"]} Reconnect for retry also failed: ${retryConnect["message"]}"
+            )
+        }
+        val retry = tvsPrintRawBytes(bytes)
+        return if (retry["ok"] == true) {
+            retry + mapOf(
+                "reconnected" to true,
+                "retried" to true,
+                "message" to "Label command fully transmitted after reconnect and one retry."
+            )
+        } else {
+            retry + mapOf(
+                "retried" to true,
+                "message" to "Printing failed after reconnect and one retry: ${retry["message"]}"
+            )
+        }
+    }
+
+    private fun hasTrailingPrintCommand(bytes: ByteArray): Boolean {
+        val start = (bytes.size - 256).coerceAtLeast(0)
+        val tail = bytes.copyOfRange(start, bytes.size)
+            .toString(Charsets.ISO_8859_1)
+            .uppercase()
+        return Regex("""PRINT\s+\d+\s*,\s*\d+""").containsMatchIn(tail)
     }
 
     private fun printerStatusError(printer: LabelPrinter): Map<String, Any>? {

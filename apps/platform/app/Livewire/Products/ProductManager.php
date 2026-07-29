@@ -6,6 +6,7 @@ use App\Models\InventoryTransaction;
 use App\Models\ProductConfiguration\Product;
 use App\Models\ProductConfiguration\UnitConversionRule;
 use App\Models\ProductionTransaction;
+use App\Support\ProductCustomerBarcode;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -27,6 +28,8 @@ class ProductManager extends Component
 
     public bool $hasUnitConversion = false;
 
+    public bool $hasCustomerBarcode = false;
+
     public function editProduct(string $productId): void
     {
         $product = Product::query()->where('tenant_id', $this->tenantId())->findOrFail($productId);
@@ -41,12 +44,16 @@ class ProductManager extends Component
         $this->editingProductId = $product->id;
         $this->hasWeightRange = filled($product->getRawOriginal('minimum_weight')) || filled($product->getRawOriginal('maximum_weight'));
         $this->hasUnitConversion = (bool) $product->unit_conversion_enabled;
+        $this->hasCustomerBarcode = (bool) $product->customer_barcode_enabled;
         $this->form = [
             'name' => $product->name,
             'default_tare_weight' => $this->decimalForForm($product->getRawOriginal('default_tare_weight') ?? 0),
             'minimum_weight' => $this->decimalForForm($product->getRawOriginal('minimum_weight')),
             'maximum_weight' => $this->decimalForForm($product->getRawOriginal('maximum_weight')),
             'pieces_per_kg' => $this->decimalForForm($conversion?->getRawOriginal('pieces_per_kg')),
+            'customer_barcode_type' => $product->customer_barcode_type ?: 'code128',
+            'customer_barcode_value' => $product->customer_barcode_value ?? '',
+            'customer_barcode_caption' => $product->customer_barcode_caption ?? 'CUSTOMER SKU',
         ];
         $this->resetValidation();
     }
@@ -56,12 +63,16 @@ class ProductManager extends Component
         $this->editingProductId = null;
         $this->hasWeightRange = false;
         $this->hasUnitConversion = false;
+        $this->hasCustomerBarcode = false;
         $this->form = [
             'name' => '',
             'default_tare_weight' => '',
             'minimum_weight' => '',
             'maximum_weight' => '',
             'pieces_per_kg' => '',
+            'customer_barcode_type' => 'code128',
+            'customer_barcode_value' => '',
+            'customer_barcode_caption' => 'CUSTOMER SKU',
         ];
         $this->resetValidation();
     }
@@ -75,7 +86,22 @@ class ProductManager extends Component
             'form.minimum_weight' => [$this->hasWeightRange ? 'required' : 'nullable', 'numeric', 'min:0'],
             'form.maximum_weight' => [$this->hasWeightRange ? 'required' : 'nullable', 'numeric', 'min:0', 'gte:form.minimum_weight'],
             'form.pieces_per_kg' => [$this->hasUnitConversion ? 'required' : 'nullable', 'numeric', 'min:0'],
+            'form.customer_barcode_type' => [$this->hasCustomerBarcode ? 'required' : 'nullable', 'string', 'in:'.implode(',', array_keys(ProductCustomerBarcode::TYPES))],
+            'form.customer_barcode_value' => [$this->hasCustomerBarcode ? 'required' : 'nullable', 'string', 'max:120'],
+            'form.customer_barcode_caption' => ['nullable', 'string', 'max:80'],
         ])['form'];
+
+        if ($this->hasCustomerBarcode) {
+            $message = ProductCustomerBarcode::validationMessage(
+                (string) ($validated['customer_barcode_type'] ?? ''),
+                trim((string) ($validated['customer_barcode_value'] ?? '')),
+            );
+            if ($message) {
+                $this->addError('form.customer_barcode_value', $message);
+
+                return;
+            }
+        }
 
         $productData = [
             'name' => $validated['name'],
@@ -83,6 +109,12 @@ class ProductManager extends Component
             'minimum_weight' => $this->hasWeightRange ? $this->nullableDecimal($validated['minimum_weight'] ?? null) : null,
             'maximum_weight' => $this->hasWeightRange ? $this->nullableDecimal($validated['maximum_weight'] ?? null) : null,
             'unit_conversion_enabled' => $this->hasUnitConversion,
+            'customer_barcode_enabled' => $this->hasCustomerBarcode,
+            'customer_barcode_type' => $this->hasCustomerBarcode ? $validated['customer_barcode_type'] : null,
+            'customer_barcode_value' => $this->hasCustomerBarcode ? trim((string) $validated['customer_barcode_value']) : null,
+            'customer_barcode_caption' => $this->hasCustomerBarcode
+                ? (trim((string) ($validated['customer_barcode_caption'] ?? '')) ?: 'CUSTOMER SKU')
+                : null,
             'updated_by' => Auth::id(),
             'configuration_activated_at' => now(),
         ];
@@ -90,7 +122,10 @@ class ProductManager extends Component
         DB::transaction(function () use ($tenantId, $validated, $productData): void {
             if ($this->editingProductId) {
                 $product = Product::query()->where('tenant_id', $tenantId)->findOrFail($this->editingProductId);
-                $product->update($productData);
+                $product->update([
+                    ...$productData,
+                    'configuration_version' => $product->configuration_version + 1,
+                ]);
                 session()->flash('status', 'Product updated.');
             } else {
                 $this->releaseDeletedProductIdentity($validated['name'], $tenantId);
@@ -152,6 +187,7 @@ class ProductManager extends Component
         $tenantId = $this->tenantId();
 
         return view('livewire.products.product-manager', [
+            'customerBarcodeTypes' => ProductCustomerBarcode::TYPES,
             'products' => Product::query()
                 ->where('tenant_id', $tenantId)
                 ->when($this->search, fn ($query) => $query->where('name', 'like', '%'.$this->search.'%'))

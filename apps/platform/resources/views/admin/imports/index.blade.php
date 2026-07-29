@@ -20,7 +20,7 @@
                 <span class="import-icon">P</span>
                 <div>
                     <h2>Product Spreadsheet Import</h2>
-                    <p>Add each new product as a new row. Only Product Name is required; blank tare becomes 0, blank unit becomes kg, and extra columns are ignored.</p>
+                    <p>Add each new product as a new row. Only Product Name is required; blank tare becomes 0, blank unit becomes kg, and the customer barcode columns are optional.</p>
                 </div>
             </div>
             <form method="POST" action="{{ route('admin.imports.products') }}" enctype="multipart/form-data" class="import-upload">
@@ -63,7 +63,7 @@
                     @elseif(($productPreview['records'] ?? []) !== [])
                         <div class="table-wrap">
                             <table class="data-table">
-                                <thead><tr><th>Product</th><th>Code</th><th>Tare</th><th>Unit</th></tr></thead>
+                                <thead><tr><th>Product</th><th>Code</th><th>Tare</th><th>Unit</th><th>Customer Barcode</th></tr></thead>
                                 <tbody>
                                     @foreach(array_slice($productPreview['records'], 0, 20) as $row)
                                         <tr>
@@ -71,6 +71,7 @@
                                             <td>{{ $row['product_code'] }}</td>
                                             <td>{{ number_format($row['tare_weight'], 3) }}</td>
                                             <td>{{ $row['unit'] }}</td>
+                                            <td>{{ $row['customer_barcode_enabled'] ? (($customerBarcodeTypes[$row['customer_barcode_type']] ?? strtoupper((string) $row['customer_barcode_type'])).': '.$row['customer_barcode_value']) : '-' }}</td>
                                         </tr>
                                     @endforeach
                                 </tbody>

@@ -26,8 +26,14 @@ class LabelTemplateValidator
             $this->validateElement($element, $index);
         }
 
-        if (collect($template['elements'])->where('type', 'barcode')->count() > 1) {
-            throw ValidationException::withMessages(['template_json.elements' => 'Only one barcode element is allowed per label template.']);
+        $barcodes = collect($template['elements'])->where('type', 'barcode');
+        if ($barcodes->count() > 2) {
+            throw ValidationException::withMessages(['template_json.elements' => 'A maximum of one inventory barcode and one product customer barcode is allowed.']);
+        }
+        foreach (['barcode.value', 'product.customer_barcode'] as $bindingKey) {
+            if ($barcodes->where('bindingKey', $bindingKey)->count() > 1) {
+                throw ValidationException::withMessages(['template_json.elements' => "Only one {$bindingKey} element is allowed per label template."]);
+            }
         }
 
         if (collect($template['elements'])->filter(fn (array $element): bool => in_array($element['type'] ?? null, ['qr', 'qrcode'], true))->count() > 1) {
@@ -64,8 +70,11 @@ class LabelTemplateValidator
             }
         }
 
-        if (collect($elements)->where('type', 'barcode')->count() > 1) {
-            $warnings[] = ['type' => 'single_barcode_only'];
+        $barcodes = collect($elements)->where('type', 'barcode');
+        if ($barcodes->count() > 2
+            || $barcodes->where('bindingKey', 'barcode.value')->count() > 1
+            || $barcodes->where('bindingKey', 'product.customer_barcode')->count() > 1) {
+            $warnings[] = ['type' => 'one_inventory_and_one_customer_barcode_only'];
         }
 
         if (collect($elements)->filter(fn (array $element): bool => in_array($element['type'] ?? null, ['qr', 'qrcode'], true))->count() > 1) {
@@ -99,6 +108,13 @@ class LabelTemplateValidator
             && ((float) $element['width'] < 15 || (float) $element['height'] < 15)) {
             throw ValidationException::withMessages([
                 "template_json.elements.{$index}" => 'QR verification elements must be at least 15 × 15 mm for reliable scanning.',
+            ]);
+        }
+
+        if (($element['type'] ?? null) === 'barcode'
+            && ! in_array($element['bindingKey'] ?? 'barcode.value', ['barcode.value', 'product.customer_barcode'], true)) {
+            throw ValidationException::withMessages([
+                "template_json.elements.{$index}.bindingKey" => 'Unsupported barcode data source.',
             ]);
         }
     }

@@ -328,13 +328,40 @@ class LabelDesigner extends Component
     {
         $this->syncTemplateFromText();
 
-        if (collect($this->templateJson['elements'])->where('type', 'barcode')->isNotEmpty()) {
+        if (collect($this->templateJson['elements'])
+            ->where('type', 'barcode')
+            ->filter(fn (array $element): bool => ($element['bindingKey'] ?? 'barcode.value') === 'barcode.value')
+            ->isNotEmpty()) {
             $this->warnings = [['type' => 'single_barcode_only']];
 
             return;
         }
 
         $this->addElement(['type' => 'barcode', 'bindingKey' => 'barcode.value', 'width' => 45, 'height' => 16]);
+    }
+
+    public function addCustomerBarcode(): void
+    {
+        $this->syncTemplateFromText();
+
+        if (collect($this->templateJson['elements'])
+            ->where('type', 'barcode')
+            ->where('bindingKey', 'product.customer_barcode')
+            ->isNotEmpty()) {
+            $this->warnings = [['type' => 'single_customer_barcode_only']];
+
+            return;
+        }
+
+        $this->addElement([
+            'type' => 'barcode',
+            'bindingKey' => 'product.customer_barcode',
+            'caption' => '',
+            'captionPosition' => 'top',
+            'showValue' => true,
+            'width' => 45,
+            'height' => 20,
+        ]);
     }
 
     public function addLine(): void
@@ -385,8 +412,8 @@ class LabelDesigner extends Component
             return;
         }
 
-        if (($last['type'] ?? null) === 'barcode' && collect($elements)->where('type', 'barcode')->isNotEmpty()) {
-            $this->warnings = [['type' => 'single_barcode_only']];
+        if (($last['type'] ?? null) === 'barcode') {
+            $this->warnings = [['type' => 'single_barcode_source_only']];
 
             return;
         }
@@ -419,7 +446,10 @@ class LabelDesigner extends Component
             return;
         }
 
-        if ($this->selectedElementKey === 'barcode') {
+        $selected = collect($this->templateJson['elements'] ?? [])
+            ->firstWhere('key', $this->selectedElementKey);
+        if (($selected['type'] ?? null) === 'barcode'
+            && ($selected['bindingKey'] ?? 'barcode.value') === 'barcode.value') {
             $this->statusMessage = 'Barcode is mandatory and cannot be deleted. You can move or resize it.';
 
             return;
@@ -465,7 +495,7 @@ class LabelDesigner extends Component
 
     public function updateSelected(string $field, mixed $value): void
     {
-        $allowed = ['x', 'y', 'width', 'height', 'rotation', 'layerOrder', 'text', 'bindingKey', 'prefix', 'suffix', 'fontSize', 'fontFamily', 'fontWeight', 'fontStyle', 'align'];
+        $allowed = ['x', 'y', 'width', 'height', 'rotation', 'layerOrder', 'text', 'bindingKey', 'prefix', 'suffix', 'caption', 'captionPosition', 'showValue', 'fontSize', 'fontFamily', 'fontWeight', 'fontStyle', 'align'];
 
         if (! in_array($field, $allowed, true)) {
             return;
@@ -479,6 +509,8 @@ class LabelDesigner extends Component
             } elseif (in_array($field, ['fontSize', 'fontFamily', 'fontWeight', 'fontStyle', 'align'], true)) {
                 $element['style'] ??= [];
                 $element['style'][$field] = $field === 'fontSize' ? max(4, (float) $value) : (string) $value;
+            } elseif ($field === 'showValue') {
+                $element[$field] = filter_var($value, FILTER_VALIDATE_BOOL);
             } else {
                 $element[$field] = (string) $value;
             }
@@ -631,7 +663,9 @@ class LabelDesigner extends Component
             ->filter(fn (array $element): bool => ($element['type'] ?? null) === 'barcode')
             ->values();
 
-        if ($barcodes->isEmpty()) {
+        $inventoryBarcode = $barcodes
+            ->first(fn (array $element): bool => ($element['bindingKey'] ?? 'barcode.value') === 'barcode.value');
+        if (! $inventoryBarcode) {
             $this->templateJson['elements'][] = $this->barcodeElement(
                 5,
                 max(3, $this->heightMm - 20),
@@ -640,16 +674,43 @@ class LabelDesigner extends Component
                 count($this->templateJson['elements']) + 1
             );
 
-            return;
+            $barcodes = collect($this->templateJson['elements'])
+                ->filter(fn (array $element): bool => ($element['type'] ?? null) === 'barcode')
+                ->values();
         }
 
-        $firstBarcodeKey = $barcodes->first()['key'] ?? 'barcode';
+        $seenInventory = false;
+        $seenCustomer = false;
         $this->templateJson['elements'] = collect($this->templateJson['elements'])
-            ->reject(fn (array $element): bool => ($element['type'] ?? null) === 'barcode' && ($element['key'] ?? null) !== $firstBarcodeKey)
+            ->filter(function (array $element) use (&$seenInventory, &$seenCustomer): bool {
+                if (($element['type'] ?? null) !== 'barcode') {
+                    return true;
+                }
+                $binding = $element['bindingKey'] ?? 'barcode.value';
+                if ($binding === 'product.customer_barcode') {
+                    if ($seenCustomer) {
+                        return false;
+                    }
+                    $seenCustomer = true;
+
+                    return true;
+                }
+                if ($seenInventory) {
+                    return false;
+                }
+                $seenInventory = true;
+
+                return true;
+            })
             ->map(function (array $element): array {
                 if (($element['type'] ?? null) === 'barcode') {
-                    $element['key'] = 'barcode';
-                    $element['bindingKey'] = 'barcode.value';
+                    $isCustomer = ($element['bindingKey'] ?? 'barcode.value') === 'product.customer_barcode';
+                    $element['key'] = $isCustomer
+                        ? (blank($element['key'] ?? null) || ($element['key'] ?? null) === 'barcode'
+                            ? 'customer_barcode'
+                            : $element['key'])
+                        : 'barcode';
+                    $element['bindingKey'] = $isCustomer ? 'product.customer_barcode' : 'barcode.value';
                     $element['width'] = max(18, min((float) ($element['width'] ?? 45), $this->widthMm));
                     $element['height'] = max(8, min((float) ($element['height'] ?? 14), $this->heightMm));
                     $element['x'] = $this->clamp((float) ($element['x'] ?? 0), 0, max(0, $this->widthMm - (float) $element['width']));

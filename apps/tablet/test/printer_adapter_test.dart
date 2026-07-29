@@ -319,6 +319,99 @@ void main() {
     expect(tspl, contains('BARCODE '));
   });
 
+  test('TSPL prints inventory and optional product customer barcodes', () {
+    final tspl = BluetoothThermalPrinterAdapter().debugTspl(
+      const PrintJob(
+        jobId: 'job-customer-barcode',
+        template: {
+          'widthMm': 75,
+          'heightMm': 75,
+          'elements': [
+            {
+              'type': 'barcode',
+              'bindingKey': 'barcode.value',
+              'x': 5,
+              'y': 38,
+              'width': 65,
+              'height': 14,
+            },
+            {
+              'type': 'barcode',
+              'bindingKey': 'product.customer_barcode',
+              'caption': '',
+              'captionPosition': 'top',
+              'showValue': true,
+              'x': 5,
+              'y': 54,
+              'width': 65,
+              'height': 17,
+            },
+          ],
+        },
+        data: {
+          'barcode_value': 'PUNIT-INTERNAL-1',
+          'customer_barcode_enabled': true,
+          'customer_barcode_type': 'ean13',
+          'customer_barcode_value': '4006381333931',
+          'customer_barcode_caption': 'CUSTOMER GTIN',
+        },
+      ),
+    );
+
+    expect(
+      RegExp(r'^BARCODE ', multiLine: true).allMatches(tspl),
+      hasLength(2),
+    );
+    expect(tspl, contains(',"128",'));
+    expect(tspl, contains(',"EAN13",'));
+    expect(tspl, contains('PUNIT-INTERNAL-1'));
+    expect(tspl, contains('4006381333931'));
+    expect(tspl, contains('CUSTOMER GTIN'));
+  });
+
+  test('missing optional customer barcode never blocks inventory label', () {
+    final tspl = BluetoothThermalPrinterAdapter().debugTspl(
+      const PrintJob(
+        jobId: 'job-no-customer-barcode',
+        template: {
+          'widthMm': 75,
+          'heightMm': 75,
+          'elements': [
+            {
+              'type': 'barcode',
+              'bindingKey': 'barcode.value',
+              'x': 5,
+              'y': 38,
+              'width': 65,
+              'height': 14,
+            },
+            {
+              'type': 'barcode',
+              'bindingKey': 'product.customer_barcode',
+              'caption': 'CUSTOMER SKU',
+              'x': 5,
+              'y': 54,
+              'width': 65,
+              'height': 17,
+            },
+          ],
+        },
+        data: {
+          'barcode_value': 'PUNIT-INTERNAL-2',
+          'customer_barcode_enabled': false,
+        },
+      ),
+    );
+
+    expect(
+      RegExp(r'^BARCODE ', multiLine: true).allMatches(tspl),
+      hasLength(1),
+    );
+    expect(tspl, contains('PUNIT-INTERNAL-2'));
+    expect(tspl, isNot(contains('CUSTOMER SKU')));
+    expect(tspl, contains('PRINT 1,1'));
+  });
+
   test('Test Print can force QR without enabling classic production QR', () {
     final tspl = BluetoothThermalPrinterAdapter(qrPrintingEnabled: false)
         .debugTspl(
