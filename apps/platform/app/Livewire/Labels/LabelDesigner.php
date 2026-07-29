@@ -6,6 +6,8 @@ use App\Domain\Labels\Services\LabelBindingRegistry;
 use App\Domain\Labels\Services\LabelTemplateService;
 use App\Domain\Labels\Services\LabelTemplateValidator;
 use App\Models\Labeling\LabelTemplate;
+use App\Models\ProductConfiguration\DynamicFieldDefinition;
+use App\Models\ProductConfiguration\Product;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Component;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
@@ -284,7 +286,8 @@ class LabelDesigner extends Component
         $this->templateJson = [
             'widthMm' => $this->widthMm,
             'heightMm' => $this->heightMm,
-            'gridMm' => 2.5,
+            'gridMm' => 0.125,
+            'precision203' => true,
             'preset' => $this->selectedPreset,
             'elements' => $preset['elements'],
         ];
@@ -398,6 +401,7 @@ class LabelDesigner extends Component
             'imageDataUri' => 'data:'.$mime.';base64,'.$encoded,
             'width' => min(24, $this->widthMm - 8),
             'height' => 14,
+            'preserveAspectRatio' => true,
         ]);
         $this->imageUpload = null;
     }
@@ -533,6 +537,7 @@ class LabelDesigner extends Component
     public function render(): mixed
     {
         $tenantId = Auth::user()?->tenant_id;
+        $bindings = app(LabelBindingRegistry::class)->bindings((string) $tenantId);
 
         return view('livewire.labels.label-designer', [
             'templates' => LabelTemplate::query()
@@ -540,13 +545,14 @@ class LabelDesigner extends Component
                 ->where('is_archived', false)
                 ->latest()
                 ->get(),
-            'bindings' => app(LabelBindingRegistry::class)->bindings((string) $tenantId),
+            'bindings' => $bindings,
             'fontFamilies' => $this->fontFamilies(),
             'fontWeights' => $this->fontWeights(),
             'presetTemplates' => $this->presetTemplates(),
             'selectedElement' => $this->selectedElement(),
             'labelSizes' => $this->labelSizes(),
-            'selectedBindingLabels' => collect(app(LabelBindingRegistry::class)->bindings((string) $tenantId))
+            'previewProducts' => $this->previewProducts((string) $tenantId),
+            'selectedBindingLabels' => collect($bindings)
                 ->pluck('label', 'key')
                 ->all(),
         ]);
@@ -560,7 +566,8 @@ class LabelDesigner extends Component
         return [
             'widthMm' => $this->widthMm,
             'heightMm' => $this->heightMm,
-            'gridMm' => 2.5,
+            'gridMm' => 0.125,
+            'precision203' => true,
             'elements' => [
                 $this->bindingElement('company_name', 'company.name', 4, 3, max(20, $this->widthMm - 8), 8, 1, '', '', 13, '800', 'center'),
                 $this->bindingElement('product_name', 'product.name', 4, 14, max(20, $this->widthMm - 8), 10, 2, 'Product: ', '', 12, '800', 'center'),
@@ -584,11 +591,13 @@ class LabelDesigner extends Component
             'height' => 8,
             'rotation' => 0,
             'layerOrder' => $index,
+            'multiline' => true,
+            'locked' => false,
             'style' => [
                 'fontSize' => 10,
                 'prefixFontSize' => 10,
                 'suffixFontSize' => 10,
-                'fontFamily' => 'Arial',
+                'fontFamily' => 'TVS Auto',
                 'fontWeight' => 'normal',
             ],
         ], $partial);
@@ -814,7 +823,8 @@ class LabelDesigner extends Component
         $this->templateJson = [
             'widthMm' => $this->widthMm,
             'heightMm' => $this->heightMm,
-            'gridMm' => 2.5,
+            'gridMm' => 0.125,
+            'precision203' => true,
             'mode' => 'structured',
             'structured' => [
                 'headerText' => $this->headerText,
@@ -879,6 +889,7 @@ class LabelDesigner extends Component
     private function fontFamilies(): array
     {
         return [
+            'TVS Auto',
             'Arial',
             'Sans Serif',
             'Helvetica',
@@ -1080,11 +1091,13 @@ class LabelDesigner extends Component
             'width' => $width,
             'height' => $height,
             'layerOrder' => $layerOrder,
+            'multiline' => true,
+            'locked' => false,
             'style' => [
                 'fontSize' => $fontSize,
                 'prefixFontSize' => $fontSize,
                 'suffixFontSize' => $fontSize,
-                'fontFamily' => 'Arial',
+                'fontFamily' => 'TVS Auto',
                 'fontWeight' => $fontWeight,
                 'align' => $align,
             ],
@@ -1104,11 +1117,13 @@ class LabelDesigner extends Component
             'layerOrder' => $layerOrder,
             'prefix' => $prefix,
             'suffix' => $suffix,
+            'multiline' => true,
+            'locked' => false,
             'style' => [
                 'fontSize' => $fontSize,
                 'prefixFontSize' => $fontSize,
                 'suffixFontSize' => $fontSize,
-                'fontFamily' => 'Arial',
+                'fontFamily' => 'TVS Auto',
                 'fontWeight' => $fontWeight,
                 'align' => $align,
             ],
@@ -1126,6 +1141,126 @@ class LabelDesigner extends Component
             'width' => $width,
             'height' => $height,
             'layerOrder' => $layerOrder,
+            'locked' => false,
         ];
+    }
+
+    private function previewProducts(string $tenantId): array
+    {
+        if ($tenantId === '') {
+            return [];
+        }
+
+        $tenant = Auth::user()?->tenant;
+        $companyName = trim((string) ($tenant?->name ?: 'Company name'));
+        $definitions = DynamicFieldDefinition::query()
+            ->where('tenant_id', $tenantId)
+            ->where('is_active', true)
+            ->orderBy('sort_order')
+            ->get();
+        $products = Product::query()
+            ->where('tenant_id', $tenantId)
+            ->where('is_active', true)
+            ->with(['variants' => fn ($query) => $query->where('is_active', true)->orderBy('name')])
+            ->orderBy('name')
+            ->limit(500)
+            ->get();
+        $date = now()->format('d/m/Y');
+        $time = now()->format('H:i');
+
+        $items = $products->map(function (Product $product) use ($companyName, $definitions, $date, $time): array {
+            $variant = $product->variants->first();
+            $metadata = collect($product->metadata ?? []);
+            $customFields = collect($metadata->get('custom_fields', []));
+            $tare = (float) ($product->default_tare_weight ?? 0);
+            $net = (float) ($product->maximum_weight ?? $product->target_weight ?? 29.700);
+            $values = [
+                'company.name' => $companyName,
+                'product.name' => $product->name,
+                'product.code' => $product->product_code ?: 'PRD-001',
+                'variant.name' => $variant?->name ?: '-',
+                'variant.code' => $variant?->variant_code ?: '-',
+                'weight.gross' => number_format($net + $tare, 3, '.', ''),
+                'weight.tare' => number_format($tare, 3, '.', ''),
+                'weight.net' => number_format($net, 3, '.', ''),
+                'pieces.quantity' => '10',
+                'batch.number' => 'BATCH-001',
+                'serial.number' => 'DEMO-'.strtoupper(substr((string) $product->id, 0, 8)),
+                'barcode.value' => $product->product_code ?: 'PHK123456',
+                'product.customer_barcode' => $product->customer_barcode_enabled
+                    ? (string) $product->customer_barcode_value
+                    : '',
+                'date.current' => $date,
+                'time.current' => $time,
+                'operator.name' => Auth::user()?->name ?: 'Operator',
+            ];
+
+            foreach ($definitions as $definition) {
+                $key = 'dynamic.'.$definition->entity_type.'.'.$definition->internal_key;
+                $value = $metadata->get($definition->internal_key)
+                    ?? $customFields->get($definition->internal_key)
+                    ?? collect($definition->dropdown_options ?? [])
+                        ->map(fn ($option) => is_array($option)
+                            ? ($option['label'] ?? $option['value'] ?? '')
+                            : $option)
+                        ->filter()
+                        ->first()
+                    ?? 'Value';
+                $values[$key] = is_scalar($value) ? (string) $value : 'Value';
+            }
+
+            return [
+                'id' => $product->id,
+                'label' => $product->name.($product->product_code ? ' ('.$product->product_code.')' : ''),
+                'values' => $values,
+            ];
+        })->values();
+
+        $longestValues = [];
+        foreach ($items as $item) {
+            foreach ($item['values'] as $key => $value) {
+                if (mb_strlen((string) $value) > mb_strlen((string) ($longestValues[$key] ?? ''))) {
+                    $longestValues[$key] = (string) $value;
+                }
+            }
+        }
+        foreach ($definitions as $definition) {
+            $key = 'dynamic.'.$definition->entity_type.'.'.$definition->internal_key;
+            $longestOption = collect($definition->dropdown_options ?? [])
+                ->map(fn ($option) => is_array($option)
+                    ? ($option['label'] ?? $option['value'] ?? '')
+                    : $option)
+                ->filter()
+                ->sortByDesc(fn ($value) => mb_strlen((string) $value))
+                ->first();
+            if ($longestOption && mb_strlen((string) $longestOption) > mb_strlen((string) ($longestValues[$key] ?? ''))) {
+                $longestValues[$key] = (string) $longestOption;
+            }
+        }
+
+        $fallback = [
+            'company.name' => $companyName,
+            'product.name' => 'Longest product name',
+            'product.code' => 'PRODUCT-CODE',
+            'variant.name' => 'Product detail',
+            'variant.code' => 'VARIANT-CODE',
+            'weight.gross' => '30.500',
+            'weight.tare' => '0.800',
+            'weight.net' => '29.700',
+            'pieces.quantity' => '10',
+            'batch.number' => 'BATCH-001',
+            'serial.number' => 'DEMO-12345678',
+            'barcode.value' => 'PHK123456',
+            'product.customer_barcode' => 'CUSTOMER123',
+            'date.current' => $date,
+            'time.current' => $time,
+            'operator.name' => Auth::user()?->name ?: 'Operator',
+        ];
+
+        return collect([[
+            'id' => '__longest__',
+            'label' => 'Longest values (all products)',
+            'values' => array_replace($fallback, $longestValues),
+        ]])->merge($items)->all();
     }
 }

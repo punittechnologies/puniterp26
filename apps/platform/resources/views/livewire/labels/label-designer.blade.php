@@ -1,6 +1,6 @@
 <div
     class="label-studio"
-    x-data="labelDesigner(@entangle('templateJsonText').live, @entangle('widthMm').live, @entangle('heightMm').live)"
+    x-data="labelDesigner(@entangle('templateJsonText').live, @entangle('widthMm').live, @entangle('heightMm').live, @js($previewProducts))"
     x-init="init()"
 >
     <textarea class="hidden" x-model="templateJsonText" wire:model.live.debounce.350ms="templateJsonText"></textarea>
@@ -185,13 +185,27 @@
                     <button type="button" x-on:click="duplicate()">Duplicate</button>
                 </div>
             </div>
-            <p class="label-canvas-help">Click one field, then drag it. Only the selected field moves. Resize from the blue handles.</p>
+            <div class="label-preview-data-bar">
+                <label>
+                    <span>Preview using real product values</span>
+                    <select x-model="previewProductId" x-on:change="changePreviewProduct()">
+                        <template x-for="product in previewProducts" :key="product.id">
+                            <option :value="product.id" x-text="product.label"></option>
+                        </template>
+                    </select>
+                </label>
+                <div>
+                    <strong>203-DPI precision</strong>
+                    <span>Positions snap to 0.125 mm (one printer dot). Choose “Longest values” to test the safest layout.</span>
+                </div>
+            </div>
+            <p class="label-canvas-help">Drag any field precisely. Side handles change its area; corner handles resize the object and proportionally change text size. Arrow keys move one printer dot.</p>
             <div class="label-canvas-wrap">
                 <div id="label-stage" wire:ignore></div>
             </div>
             <div class="label-warning-row" x-show="warnings.length">
-                <template x-for="warning in warnings" :key="warning.type + (warning.element || '')">
-                    <span x-text="warning.type"></span>
+                <template x-for="(warning, warningIndex) in warnings" :key="warning.type + (warning.element || '') + warningIndex">
+                    <span x-text="warningMessage(warning)"></span>
                 </template>
             </div>
         </main>
@@ -237,7 +251,7 @@
                         <input placeholder="Example: kg, pcs, mm" x-model="selectedElement.suffix" x-on:change="updateSelected('suffix', selectedElement.suffix || '')">
                     </label>
                     <p x-show="selectedElement?.type === 'binding_text'" class="label-preview-value-note">
-                        Preview uses sample value: <strong x-text="selectedElement?.previewValue || previewValueForBinding(selectedElement?.bindingKey, selectedElement?.text)"></strong>
+                        Preview uses real value: <strong x-text="currentPreviewValues()[selectedElement?.bindingKey] ?? selectedElement?.previewValue ?? previewValueForBinding(selectedElement?.bindingKey, selectedElement?.text)"></strong>
                     </p>
                 </div>
 
@@ -267,53 +281,44 @@
 
                 <div class="label-field-editor-title">
                     <strong>Move selected field</strong>
-                    <span>For text, use font size instead of stretching a box.</span>
+                    <span>Drag on the canvas or enter exact printer measurements below.</span>
                 </div>
 
                 <div class="label-format-grid">
                     <label>
                         <span>X mm</span>
-                        <input type="number" step="1" x-model.number="selectedElement.x" x-on:change="updateSelected('x', selectedElement.x)">
+                        <input type="number" step="0.125" x-model.number="selectedElement.x" x-on:change="updateSelected('x', selectedElement.x)">
                     </label>
                     <label>
                         <span>Y mm</span>
-                        <input type="number" step="1" x-model.number="selectedElement.y" x-on:change="updateSelected('y', selectedElement.y)">
+                        <input type="number" step="0.125" x-model.number="selectedElement.y" x-on:change="updateSelected('y', selectedElement.y)">
                     </label>
                 </div>
 
-                <div class="label-format-grid" x-show="['barcode','qr','image','rectangle','line'].includes(selectedElement?.type)">
+                <div class="label-format-grid">
                     <label>
-                        <span>Width</span>
-                        <input type="number" step="1" x-model.number="selectedElement.width" x-on:change="updateSelected('width', selectedElement.width)">
+                        <span>Width mm</span>
+                        <input type="number" step="0.125" x-model.number="selectedElement.width" x-on:change="updateSelected('width', selectedElement.width)">
                     </label>
                     <label>
-                        <span>Height</span>
-                        <input type="number" step="1" x-model.number="selectedElement.height" x-on:change="updateSelected('height', selectedElement.height)">
+                        <span>Height mm</span>
+                        <input type="number" step="0.125" x-model.number="selectedElement.height" x-on:change="updateSelected('height', selectedElement.height)">
                     </label>
                 </div>
 
                 <details class="label-text-width-details" x-show="!['barcode','qr','image','rectangle','line'].includes(selectedElement?.type)">
-                    <summary>Advanced text line width</summary>
-                    <div class="label-format-grid">
-                        <label>
-                            <span>Line width</span>
-                            <input type="number" step="1" x-model.number="selectedElement.width" x-on:change="updateSelected('width', selectedElement.width)">
-                        </label>
-                        <label>
-                            <span>Line height</span>
-                            <input type="number" step="1" x-model.number="selectedElement.height" x-on:change="updateSelected('height', selectedElement.height)">
-                        </label>
-                    </div>
+                    <summary>What does the text area mean?</summary>
+                    <p>Width and height reserve space for this field. They never silently change your chosen font size. Overflow is shown in red and a safe font size is suggested.</p>
                 </details>
 
                 <div class="label-format-buttons label-format-buttons--move">
-                    <button type="button" x-on:click="nudge(0, -1)">Up</button>
-                    <button type="button" x-on:click="nudge(0, 1)">Down</button>
-                    <button type="button" x-on:click="nudge(-1, 0)">Left</button>
-                    <button type="button" x-on:click="nudge(1, 0)">Right</button>
+                    <button type="button" x-on:click="nudge(0, -0.125)">Up 1 dot</button>
+                    <button type="button" x-on:click="nudge(0, 0.125)">Down 1 dot</button>
+                    <button type="button" x-on:click="nudge(-0.125, 0)">Left 1 dot</button>
+                    <button type="button" x-on:click="nudge(0.125, 0)">Right 1 dot</button>
                 </div>
 
-                <div class="label-format-buttons label-format-buttons--size" x-show="['barcode','qr','image','rectangle','line'].includes(selectedElement?.type)">
+                <div class="label-format-buttons label-format-buttons--size">
                     <button type="button" x-on:click="resizeSelected(2, 0)">Wider</button>
                     <button type="button" x-on:click="resizeSelected(-2, 0)">Narrower</button>
                     <button type="button" x-on:click="resizeSelected(0, 2)">Taller</button>
@@ -321,10 +326,17 @@
                 </div>
 
                 <div class="label-format-buttons">
-                    <button type="button" x-on:click="rotateSelected(-5)">Rotate -</button>
-                    <button type="button" x-on:click="rotateSelected(5)">Rotate +</button>
+                    <button type="button" x-on:click="rotateSelected(-90)">Rotate -90°</button>
+                    <button type="button" x-on:click="rotateSelected(90)">Rotate +90°</button>
                     <button type="button" x-on:click="layerSelected(-1)">Send back</button>
                     <button type="button" x-on:click="layerSelected(1)">Bring front</button>
+                </div>
+
+                <div class="label-format-buttons">
+                    <button type="button" x-on:click="alignSelected('left')">Canvas left</button>
+                    <button type="button" x-on:click="alignSelected('center')">Canvas centre</button>
+                    <button type="button" x-on:click="alignSelected('right')">Canvas right</button>
+                    <button type="button" x-on:click="alignSelected('middle')">Canvas middle</button>
                 </div>
 
                 <label x-show="!['barcode','qr','image','rectangle','line'].includes(selectedElement?.type)">
@@ -351,21 +363,51 @@
                     </label>
                 </div>
 
-                <p class="label-preview-value-note" x-show="!['barcode','qr','image','rectangle','line'].includes(selectedElement?.type)">
-                    Prefix, live value and suffix use one font size so the web preview and 203-DPI printer stay aligned.
-                </p>
+                <div
+                    class="label-text-fit-status"
+                    x-show="!['barcode','qr','image','rectangle','line'].includes(selectedElement?.type)"
+                    x-bind:class="{ 'is-overflowing': selectedTextAnalysis()?.overflow }"
+                >
+                    <strong x-text="selectedTextAnalysis()?.overflow ? 'Text will not fully fit' : 'Text fits in the selected area'"></strong>
+                    <span x-text="selectedTextAnalysis()?.summary"></span>
+                    <span x-show="selectedTextAnalysis()?.overflow">
+                        Keep your chosen size or use suggested size
+                        <strong x-text="selectedTextAnalysis()?.suggestedFontSize"></strong>.
+                    </span>
+                    <button type="button" x-show="selectedTextAnalysis()?.overflow" x-on:click="useSuggestedFontSize()">Use suggested size</button>
+                </div>
+
+                <label class="label-check" x-show="!['barcode','qr','image','rectangle','line'].includes(selectedElement?.type)">
+                    <input type="checkbox" x-model="selectedElement.multiline" x-on:change="updateSelected('multiline', selectedElement.multiline)">
+                    <span>Allow multiple lines</span>
+                </label>
+
+                <label class="label-check">
+                    <input type="checkbox" x-model="selectedElement.locked" x-on:change="updateSelected('locked', selectedElement.locked)">
+                    <span>Lock this object</span>
+                </label>
+
+                <label class="label-check" x-show="selectedElement?.type === 'image'">
+                    <input type="checkbox" x-model="selectedElement.preserveAspectRatio" x-on:change="updateSelected('preserveAspectRatio', selectedElement.preserveAspectRatio)">
+                    <span>Preserve image proportions</span>
+                </label>
 
                 <div class="label-format-buttons" x-show="!['barcode','qr','image','rectangle','line'].includes(selectedElement?.type)">
                     <button type="button" x-on:click="changeFontSize(-1)">Font -</button>
                     <button type="button" x-on:click="changeFontSize(1)">Font +</button>
-                    <button type="button" x-on:click="fitText()">Fit text</button>
+                    <button type="button" x-on:click="useSuggestedFontSize()">Use suggested</button>
                     <button type="button" x-on:click="updateSelected('style.fontWeight', '800')">Max bold</button>
+                </div>
+
+                <div class="label-format-buttons" x-show="!['barcode','qr','image','rectangle','line'].includes(selectedElement?.type)">
+                    <button type="button" x-on:click="copySelectedStyle()">Copy style</button>
+                    <button type="button" x-on:click="pasteSelectedStyle()" x-bind:disabled="!styleClipboard">Paste style</button>
                 </div>
 
                 <div class="label-format-grid" x-show="!['barcode','qr','image','rectangle','line'].includes(selectedElement?.type)">
                     <label>
                         <span>Style</span>
-                        <select x-model="selectedElement.style.fontStyle" x-on:change="updateSelected('style.fontStyle', selectedElement.style.fontStyle)">
+                        <select x-model="selectedElement.style.fontStyle" x-bind:disabled="templateJson.precision203" x-on:change="updateSelected('style.fontStyle', selectedElement.style.fontStyle)">
                             <option value="normal">Normal</option>
                             <option value="italic">Italic</option>
                         </select>
@@ -383,13 +425,23 @@
 
                 <label>
                     <span>Rotation</span>
-                    <input type="number" step="1" x-model.number="selectedElement.rotation" x-on:change="updateSelected('rotation', selectedElement.rotation)">
+                    <input type="number" step="90" x-model.number="selectedElement.rotation" x-on:change="updateSelected('rotation', selectedElement.rotation)">
                 </label>
 
                 <button type="button" class="label-delete-button" x-on:click="remove()" x-bind:disabled="selectedElement?.type === 'barcode' && (selectedElement?.bindingKey || 'barcode.value') === 'barcode.value'">
                     Delete selected
                 </button>
             </div>
+
+            <details class="label-layer-list">
+                <summary>Objects and layers</summary>
+                <template x-for="element in orderedElements()" :key="element.key">
+                    <button type="button" x-on:click="selectElementByKey(element.key)">
+                        <span x-text="elementLabel(element)"></span>
+                        <small x-text="element.locked ? 'Locked' : `Layer ${element.layerOrder || 1}`"></small>
+                    </button>
+                </template>
+            </details>
         </aside>
     </div>
 

@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Domain\Labels\Services\LabelTemplateService;
+use App\Livewire\Labels\LabelDesigner;
 use App\Models\Permission;
 use App\Models\ProductConfiguration\Product;
 use App\Models\ProductConfiguration\ProductVariant;
@@ -12,6 +13,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
+use Livewire\Livewire;
 use Tests\TestCase;
 
 class PhaseThreeLabelTemplateTest extends TestCase
@@ -100,6 +102,53 @@ class PhaseThreeLabelTemplateTest extends TestCase
             'scope' => 'tenant',
             'template_json' => $template,
         ], $tenant->id);
+    }
+
+    public function test_new_precision_designer_previews_real_product_values_without_changing_saved_templates(): void
+    {
+        $tenant = Tenant::query()->create([
+            'name' => 'Precision Company',
+            'code' => 'PRECISION',
+            'status' => 'active',
+        ]);
+        $user = User::query()->create([
+            'tenant_id' => $tenant->id,
+            'name' => 'Designer Admin',
+            'email' => 'designer@example.test',
+            'password' => Hash::make('password'),
+            'is_active' => true,
+        ]);
+        Product::query()->create([
+            'tenant_id' => $tenant->id,
+            'name' => 'Actual Preview Product',
+            'product_code' => 'ACTUAL-001',
+            'default_tare_weight' => 0.250,
+            'maximum_weight' => 12.750,
+            'is_active' => true,
+        ]);
+
+        $this->actingAs($user)->get('/labels')
+            ->assertOk()
+            ->assertSee('Preview using real product values')
+            ->assertSee('Actual Preview Product')
+            ->assertSee('Longest values (all products)');
+
+        Livewire::actingAs($user)
+            ->test(LabelDesigner::class)
+            ->assertSet('templateJson.precision203', true)
+            ->assertSet('templateJson.gridMm', 0.125);
+
+        $legacy = app(LabelTemplateService::class)->create([
+            'name' => 'Existing Legacy Label',
+            'code' => 'LEGACY-LABEL',
+            'scope' => 'tenant',
+            'template_json' => $this->templateJson('Legacy'),
+        ], $tenant->id);
+
+        Livewire::actingAs($user)
+            ->test(LabelDesigner::class, ['template' => $legacy->id])
+            ->assertSet('templateJson.precision203', null)
+            ->assertSet('templateJson.elements.0.multiline', null);
     }
 
     private function tenantToken(): array

@@ -1079,6 +1079,71 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
       if (value.isEmpty) continue;
 
       final text = '$prefix$value$suffix';
+      final multiline = _truthy(element['multiline']);
+      if (multiline) {
+        final fieldWidthMm = (_num(element['width']) ?? widthMm).toDouble();
+        final font = _precisionFontName(
+          fontSize,
+          style['fontFamily']?.toString() ?? '',
+        );
+        const multiplier = 1;
+        final charactersPerLine = _charsForWidth(
+          fieldWidthMm,
+          fontSize,
+          weight,
+          style['fontFamily']?.toString() ?? '',
+          true,
+        );
+        final wrappedLines = _wrapPrinterText(text, charactersPerLine);
+        final lineHeightDots = _fontHeightDots(font) * multiplier;
+        final maxLines = (_dots(element['height']) ~/ lineHeightDots).clamp(
+          1,
+          20,
+        );
+        final rotation = _printerRotation(element['rotation']);
+        for (
+          var lineIndex = 0;
+          lineIndex < wrappedLines.length && lineIndex < maxLines;
+          lineIndex++
+        ) {
+          final line = _limit(wrappedLines[lineIndex], charactersPerLine);
+          final lineX = _alignedX(
+            element,
+            line,
+            fontSize,
+            align,
+            weight,
+            style['fontFamily']?.toString() ?? '',
+            true,
+          );
+          final lineY = _dots(element['y']) + (lineIndex * lineHeightDots);
+          lines.add(
+            _text(
+              lineX,
+              lineY,
+              font,
+              multiplier,
+              multiplier,
+              line,
+              rotation: rotation,
+            ),
+          );
+          if (['bold', '700', '800'].contains(weight)) {
+            lines.add(
+              _text(
+                lineX + 1,
+                lineY,
+                font,
+                multiplier,
+                multiplier,
+                line,
+                rotation: rotation,
+              ),
+            );
+          }
+        }
+        continue;
+      }
       final limitedText = _limit(
         text,
         _charsForWidth(
@@ -1214,11 +1279,26 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
     }
   }
 
-  String _text(int x, int y, String font, int xMul, int yMul, String value) {
-    return 'TEXT $x,$y,"$font",0,$xMul,$yMul,"${_escape(value)}"';
+  String _text(
+    int x,
+    int y,
+    String font,
+    int xMul,
+    int yMul,
+    String value, {
+    int rotation = 0,
+  }) {
+    return 'TEXT $x,$y,"$font",$rotation,$xMul,$yMul,"${_escape(value)}"';
   }
 
-  String _fontName(num fontSize, String weight) {
+  String _fontName(num fontSize, String weight, [String fontFamily = '']) {
+    final explicit = RegExp(
+      r'TSPL(?: Font)?\s*([1-5])',
+      caseSensitive: false,
+    ).firstMatch(fontFamily);
+    if (explicit != null) {
+      return explicit.group(1)!;
+    }
     if (fontSize >= 11 ||
         weight == 'bold' ||
         weight == '700' ||
@@ -1228,10 +1308,39 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
     return '1';
   }
 
+  String _precisionFontName(num fontSize, [String fontFamily = '']) {
+    final explicit = RegExp(
+      r'TSPL(?: Font)?\s*([1-5])',
+      caseSensitive: false,
+    ).firstMatch(fontFamily);
+    if (explicit != null) {
+      return explicit.group(1)!;
+    }
+    if (fontSize <= 7) return '1';
+    if (fontSize <= 10) return '2';
+    if (fontSize <= 14) return '3';
+    if (fontSize <= 20) return '4';
+    return '5';
+  }
+
   int _fontMultiplier(num fontSize) => fontSize >= 13 ? 2 : 1;
 
-  int _estimatedTextWidthDots(String text, num fontSize, [String weight = '']) {
-    final font = _fontName(fontSize, weight);
+  int _fontHeightDots(String font) => switch (font) {
+    '1' => 12,
+    '2' => 20,
+    '3' => 24,
+    '4' => 32,
+    '5' => 48,
+    _ => 12,
+  };
+
+  int _estimatedTextWidthDots(
+    String text,
+    num fontSize, [
+    String weight = '',
+    String fontFamily = '',
+  ]) {
+    final font = _fontName(fontSize, weight, fontFamily);
     final baseCharacterWidth = switch (font) {
       '1' => 8,
       '2' => 12,
@@ -1241,6 +1350,23 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
       _ => 8,
     };
     return text.length * baseCharacterWidth * _fontMultiplier(fontSize);
+  }
+
+  int _estimatedPrecisionTextWidthDots(
+    String text,
+    num fontSize, [
+    String fontFamily = '',
+  ]) {
+    final font = _precisionFontName(fontSize, fontFamily);
+    final baseCharacterWidth = switch (font) {
+      '1' => 8,
+      '2' => 12,
+      '3' => 16,
+      '4' => 24,
+      '5' => 32,
+      _ => 8,
+    };
+    return text.length * baseCharacterWidth;
   }
 
   String _weight(Object? value, String unit) {
@@ -1316,10 +1442,14 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
     num fontSize,
     String align, [
     String weight = '',
+    String fontFamily = '',
+    bool precision = false,
   ]) {
     return _alignedXForWidth(
       element,
-      _estimatedTextWidthDots(text, fontSize, weight),
+      precision
+          ? _estimatedPrecisionTextWidthDots(text, fontSize, fontFamily)
+          : _estimatedTextWidthDots(text, fontSize, weight, fontFamily),
       align,
     );
   }
@@ -1508,10 +1638,54 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
     return num.tryParse(value?.toString() ?? '');
   }
 
-  int _charsForWidth(double widthMm, num fontSize, [String weight = '']) {
+  int _charsForWidth(
+    double widthMm,
+    num fontSize, [
+    String weight = '',
+    String fontFamily = '',
+    bool precision = false,
+  ]) {
     final widthDots = _dots(widthMm);
-    final characterWidth = _estimatedTextWidthDots('M', fontSize, weight);
+    final characterWidth = precision
+        ? _estimatedPrecisionTextWidthDots('M', fontSize, fontFamily)
+        : _estimatedTextWidthDots('M', fontSize, weight, fontFamily);
     return (widthDots ~/ characterWidth).clamp(1, 64);
+  }
+
+  List<String> _wrapPrinterText(String value, int charactersPerLine) {
+    final normalized = _clean(value);
+    if (normalized.isEmpty) return const [''];
+    final lines = <String>[];
+    var line = '';
+    for (final originalWord in normalized.split(' ')) {
+      var word = originalWord;
+      while (word.length > charactersPerLine) {
+        if (line.isNotEmpty) {
+          lines.add(line);
+          line = '';
+        }
+        lines.add(word.substring(0, charactersPerLine));
+        word = word.substring(charactersPerLine);
+      }
+      if (word.isEmpty) continue;
+      final candidate = line.isEmpty ? word : '$line $word';
+      if (candidate.length <= charactersPerLine) {
+        line = candidate;
+      } else {
+        if (line.isNotEmpty) lines.add(line);
+        line = word;
+      }
+    }
+    if (line.isNotEmpty) lines.add(line);
+    return lines.isEmpty ? const [''] : lines;
+  }
+
+  int _printerRotation(Object? value) {
+    final rotation = ((_num(value) ?? 0).round() % 360 + 360) % 360;
+    if (rotation >= 315 || rotation < 45) return 0;
+    if (rotation < 135) return 90;
+    if (rotation < 225) return 180;
+    return 270;
   }
 
   String _label(Object? value) =>

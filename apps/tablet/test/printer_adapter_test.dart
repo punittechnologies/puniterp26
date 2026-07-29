@@ -204,6 +204,86 @@ void main() {
     expect(tspl, isNot(contains('"DM19C3"')));
   });
 
+  test('precision text wraps into its own box without moving a neighbour', () {
+    final tspl = BluetoothThermalPrinterAdapter().debugTspl(
+      const PrintJob(
+        jobId: 'job-precision-multiline',
+        template: {
+          'widthMm': 75,
+          'heightMm': 75,
+          'precision203': true,
+          'elements': [
+            {
+              'type': 'binding_text',
+              'bindingKey': 'product.name',
+              'prefix': 'Product: ',
+              'x': 4,
+              'y': 10,
+              'width': 30,
+              'height': 9,
+              'multiline': true,
+              'style': {'fontSize': 9, 'fontWeight': '500', 'align': 'left'},
+            },
+            {
+              'type': 'binding_text',
+              'bindingKey': 'weight.net',
+              'prefix': 'Net: ',
+              'suffix': ' kg',
+              'x': 39,
+              'y': 10,
+              'width': 32,
+              'height': 9,
+              'multiline': true,
+              'style': {'fontSize': 9, 'fontWeight': '500', 'align': 'left'},
+            },
+            {'type': 'barcode', 'x': 5, 'y': 52, 'width': 65, 'height': 17},
+          ],
+        },
+        data: {
+          'product_name': 'Extra Long Product Name For Wrapping',
+          'net_weight': 12.48,
+          'barcode_value': 'PHK123',
+        },
+      ),
+    );
+
+    expect(tspl, contains('TEXT 32,80,"2",0,1,1,"Product: Extra Long"'));
+    expect(tspl, contains('TEXT 32,100,"2",0,1,1,"Product Name For"'));
+    expect(tspl, contains('TEXT 32,120,"2",0,1,1,"Wrapping"'));
+    expect(tspl, contains('TEXT 312,80,"2",0,1,1,"Net: 12.480 kg"'));
+  });
+
+  test('legacy text without multiline keeps its original single command', () {
+    final tspl = BluetoothThermalPrinterAdapter().debugTspl(
+      const PrintJob(
+        jobId: 'job-legacy-single-line',
+        template: {
+          'widthMm': 75,
+          'heightMm': 75,
+          'elements': [
+            {
+              'type': 'binding_text',
+              'bindingKey': 'product.name',
+              'x': 5,
+              'y': 10,
+              'width': 20,
+              'height': 9,
+              'style': {'fontSize': 9, 'fontWeight': '500', 'align': 'left'},
+            },
+            {'type': 'barcode', 'x': 5, 'y': 52, 'width': 65, 'height': 17},
+          ],
+        },
+        data: {
+          'product_name': 'Extra Long Product Name',
+          'barcode_value': 'PHK123',
+        },
+      ),
+    );
+
+    expect(tspl, contains('TEXT 40,80,"1",0,1,1,"Extra Long Product N"'));
+    expect(RegExp(r'TEXT 40,\d+,"1"').allMatches(tspl), hasLength(1));
+  });
+
   test('Web Label emits a firmware-safe QR bitmap without changing barcode', () {
     final adapter = BluetoothThermalPrinterAdapter(qrPrintingEnabled: true);
     const job = PrintJob(

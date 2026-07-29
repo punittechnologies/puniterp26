@@ -1,7 +1,7 @@
 //
 import Konva from 'konva';
 
-window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightMm) {
+window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightMm, previewProducts = []) {
     return {
         templateJsonText,
         templateJson: {},
@@ -12,6 +12,9 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
         transformer: null,
         selected: null,
         selectedElement: null,
+        previewProducts: Array.isArray(previewProducts) ? previewProducts : [],
+        previewProductId: Array.isArray(previewProducts) && previewProducts.length ? previewProducts[0].id : '',
+        styleClipboard: null,
         scale: 4,
         size: '75x75',
         warnings: [],
@@ -21,6 +24,7 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
         historyLimit: 50,
         isApplyingHistory: false,
         activeEditSnapshot: null,
+        activeTransformAnchor: '',
         keyboardHandler: null,
         init() {
             this.templateJson = this.parseJson(this.templateJsonText);
@@ -42,6 +46,14 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
                 if (!isModifier && (key === 'delete' || key === 'backspace')) {
                     event.preventDefault();
                     this.remove();
+                }
+                if (!isModifier && ['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key) && this.selectedElement) {
+                    event.preventDefault();
+                    const distance = event.shiftKey ? 1 : 0.125;
+                    if (key === 'arrowup') this.nudge(0, -distance);
+                    if (key === 'arrowdown') this.nudge(0, distance);
+                    if (key === 'arrowleft') this.nudge(-distance, 0);
+                    if (key === 'arrowright') this.nudge(distance, 0);
                 }
             };
             window.addEventListener('keydown', this.keyboardHandler);
@@ -102,7 +114,7 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
                 y: Number(element.y) * this.scale,
                 width: Number(element.width) * this.scale,
                 height: Number(element.height) * this.scale,
-                draggable: true,
+                draggable: element.locked !== true,
                 rotation: element.rotation || 0,
                 name: element.key,
             };
@@ -112,7 +124,7 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
             } else if (element.type === 'line') {
                 node = new Konva.Rect({ ...attrs, fill: '#0f172a', stroke: '#0f172a', strokeWidth: 0 });
             } else if (element.type === 'qr') {
-                node = new Konva.Group({ x: attrs.x, y: attrs.y, width: attrs.width, height: attrs.height, draggable: true, rotation: attrs.rotation, name: element.key });
+                node = new Konva.Group({ x: attrs.x, y: attrs.y, width: attrs.width, height: attrs.height, draggable: attrs.draggable, rotation: attrs.rotation, name: element.key });
                 node.add(new Konva.Rect({ x: 0, y: 0, width: attrs.width, height: attrs.height, stroke: '#111827', fill: '#fff' }));
                 const modules = 21;
                 const quiet = Math.max(3, Math.min(attrs.width, attrs.height) * 0.07);
@@ -133,29 +145,44 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
                     }
                 }
             } else if (element.type === 'barcode') {
-                node = new Konva.Group({ x: attrs.x, y: attrs.y, width: attrs.width, height: attrs.height, draggable: true, rotation: attrs.rotation, name: element.key });
+                node = new Konva.Group({ x: attrs.x, y: attrs.y, width: attrs.width, height: attrs.height, draggable: attrs.draggable, rotation: attrs.rotation, name: element.key });
                 node.add(new Konva.Rect({ x: 0, y: 0, width: attrs.width, height: attrs.height, stroke: '#111827', fill: '#f8fafc' }));
                 const isCustomer = element.bindingKey === 'product.customer_barcode';
+                const previewValues = this.currentPreviewValues();
+                const sampleValue = String(previewValues[element.bindingKey || 'barcode.value'] || (isCustomer ? '' : 'PHK123456'));
                 const caption = String(element.caption || (isCustomer ? 'CUSTOMER SKU' : '')).trim();
                 const captionPosition = element.captionPosition || (caption ? 'top' : 'none');
                 const captionHeight = caption && captionPosition !== 'none' ? 10 : 0;
+                if (isCustomer && !sampleValue) {
+                    node.add(new Konva.Text({
+                        x: 4,
+                        y: Math.max(2, attrs.height / 2 - 8),
+                        width: attrs.width - 8,
+                        text: 'No customer barcode for this product',
+                        fontSize: 8,
+                        align: 'center',
+                        fill: '#94a3b8',
+                        listening: false,
+                    }));
+                }
                 if (caption && captionPosition === 'top') {
                     node.add(new Konva.Text({ x: 3, y: 2, width: attrs.width - 6, text: caption, fontSize: 7, align: 'center', fill: '#0f172a', listening: false }));
                 }
                 const bars = Math.max(10, Math.floor(attrs.width / 6));
-                for (let index = 0; index < bars; index += 1) {
-                    const barWidth = index % 3 === 0 ? 3 : 1.5;
-                    node.add(new Konva.Rect({ x: 5 + index * 5, y: 4 + (captionPosition === 'top' ? captionHeight : 0), width: barWidth, height: Math.max(4, attrs.height - 13 - captionHeight), fill: '#111827', listening: false }));
+                if (sampleValue) {
+                    for (let index = 0; index < bars; index += 1) {
+                        const barWidth = index % 3 === 0 ? 3 : 1.5;
+                        node.add(new Konva.Rect({ x: 5 + index * 5, y: 4 + (captionPosition === 'top' ? captionHeight : 0), width: barWidth, height: Math.max(4, attrs.height - 13 - captionHeight), fill: '#111827', listening: false }));
+                    }
                 }
-                const sampleValue = isCustomer ? 'CUSTOMER123' : 'PHK123456';
-                if (element.showValue !== false) {
+                if (element.showValue !== false && sampleValue) {
                     node.add(new Konva.Text({ x: 4, y: Math.max(2, attrs.height - 9), width: attrs.width - 8, text: sampleValue, fontSize: 7, align: 'center', fill: '#334155', listening: false }));
                 }
                 if (caption && captionPosition === 'bottom') {
                     node.add(new Konva.Text({ x: 3, y: Math.max(2, attrs.height - (element.showValue === false ? 9 : 17)), width: attrs.width - 6, text: caption, fontSize: 7, align: 'center', fill: '#0f172a', listening: false }));
                 }
             } else if (element.type === 'image') {
-                node = new Konva.Group({ x: attrs.x, y: attrs.y, width: attrs.width, height: attrs.height, draggable: true, rotation: attrs.rotation, name: element.key });
+                node = new Konva.Group({ x: attrs.x, y: attrs.y, width: attrs.width, height: attrs.height, draggable: attrs.draggable, rotation: attrs.rotation, name: element.key });
                 node.add(new Konva.Rect({ x: 0, y: 0, width: attrs.width, height: attrs.height, stroke: '#94a3b8', dash: [3, 3], fill: '#fff' }));
                 node.add(new Konva.Text({ x: 3, y: Math.max(3, attrs.height / 2 - 5), width: Math.max(10, attrs.width - 6), text: 'LOGO / IMAGE', fontSize: 9, align: 'center', fill: '#334155', listening: false }));
 
@@ -171,19 +198,37 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
                     image.src = element.imageUrl;
                 }
             } else {
-                const fontFamily = this.resolveFontFamily(element.style?.fontFamily);
+                const analysis = this.analyseTextElement(element);
+                const fontFamily = this.templateJson.precision203 ? 'Courier New, monospace' : this.resolveFontFamily(element.style?.fontFamily);
                 const fontWeight = element.style?.fontWeight || '600';
-                const fontStyle = `${element.style?.fontStyle === 'italic' ? 'italic ' : ''}${['700', '800', 'bold'].includes(String(fontWeight)) ? 'bold' : 'normal'}`.trim();
+                const fontStyle = `${!this.templateJson.precision203 && element.style?.fontStyle === 'italic' ? 'italic ' : ''}${['700', '800', 'bold'].includes(String(fontWeight)) ? 'bold' : 'normal'}`.trim();
+                if (analysis.overflow) {
+                    this.layer.add(new Konva.Rect({
+                        x: attrs.x,
+                        y: attrs.y,
+                        width: attrs.width,
+                        height: attrs.height,
+                        stroke: '#dc2626',
+                        strokeWidth: 1.5,
+                        dash: [4, 3],
+                        listening: false,
+                    }));
+                }
                 node = new Konva.Text({
                     ...attrs,
-                    text: this.displayText(element),
-                    fontSize: (element.style?.fontSize || 10) * this.scale / 3,
+                    text: analysis.visibleLines.join('\n'),
+                    fontSize: this.templateJson.precision203
+                        ? Math.max(4, analysis.spec.characterHeightDots / 8 * this.scale * 0.78)
+                        : (element.style?.fontSize || 10) * this.scale / 3,
                     fontFamily,
                     fontStyle,
                     align: element.style?.align || 'left',
-                    fill: '#0f172a',
-                    padding: 2,
-                    verticalAlign: 'middle',
+                    fill: analysis.overflow ? '#b91c1c' : '#0f172a',
+                    padding: 0,
+                    lineHeight: 1,
+                    verticalAlign: 'top',
+                    wrap: 'none',
+                    ellipsis: false,
                 });
             }
             node.on('click tap', () => this.select(node));
@@ -199,7 +244,7 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
                     fontSize: 10,
                     prefixFontSize: 10,
                     suffixFontSize: 10,
-                    fontFamily: 'Arial',
+                    fontFamily: 'TVS Auto',
                     fontWeight: '600',
                     fontStyle: 'normal',
                     align: 'left',
@@ -210,7 +255,14 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
                 this.selectedElement.captionPosition ??= this.selectedElement.caption ? 'top' : 'none';
                 this.selectedElement.showValue ??= true;
             }
-            const canResize = ['barcode', 'qr', 'image', 'rectangle', 'line'].includes(this.selectedElement?.type);
+            if (this.selectedElement?.type === 'image') {
+                this.selectedElement.preserveAspectRatio ??= true;
+            }
+            if (this.selectedElement && !['barcode', 'qr', 'image', 'rectangle', 'line'].includes(this.selectedElement.type)) {
+                this.selectedElement.multiline ??= Boolean(this.templateJson.precision203);
+            }
+            this.selectedElement.locked ??= false;
+            const canResize = this.selectedElement?.locked !== true;
             this.transformer.resizeEnabled(canResize);
             this.transformer.enabledAnchors(canResize
                 ? ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center']
@@ -222,6 +274,7 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
             if (!this.activeEditSnapshot) {
                 this.activeEditSnapshot = this.clone(this.templateJson);
             }
+            this.activeTransformAnchor = this.transformer?.getActiveAnchor?.() || '';
         },
         persistNode(node, validate = true) {
             const key = node.name();
@@ -236,13 +289,39 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
             const heightMm = Number(this.templateJson.heightMm || this.heightMm);
             const rawWidth = Math.abs(node.width() * node.scaleX());
             const rawHeight = Math.abs(node.height() * node.scaleY());
-            element.width = Math.max(2, this.snap(rawWidth / this.scale, grid));
-            element.height = Math.max(2, this.snap(rawHeight / this.scale, grid));
+            const activeAnchor = this.activeTransformAnchor || this.transformer?.getActiveAnchor?.() || '';
+            const isText = !['barcode', 'qr', 'image', 'rectangle', 'line'].includes(element.type);
+            if (isText && ['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(activeAnchor)) {
+                const scaleFactor = Math.max(0.25, Math.min(Math.abs(node.scaleX()), Math.abs(node.scaleY())));
+                const currentFontSize = Number(element.style?.fontSize || 10);
+                element.style = {
+                    ...(element.style || {}),
+                    fontSize: Math.min(72, Math.max(4, Math.round(currentFontSize * scaleFactor))),
+                };
+            }
+            let nextWidth = Math.max(2, this.snap(rawWidth / this.scale, grid));
+            let nextHeight = Math.max(2, this.snap(rawHeight / this.scale, grid));
+            if (element.type === 'qr') {
+                const square = Math.max(15, Math.min(nextWidth, nextHeight));
+                nextWidth = square;
+                nextHeight = square;
+            }
+            if (element.type === 'image' && element.preserveAspectRatio !== false) {
+                const ratio = Math.max(0.01, Number(element.width || 1) / Math.max(0.01, Number(element.height || 1)));
+                if (['top-center', 'bottom-center'].includes(activeAnchor)) {
+                    nextWidth = nextHeight * ratio;
+                } else {
+                    nextHeight = nextWidth / ratio;
+                }
+            }
+            element.width = nextWidth;
+            element.height = nextHeight;
             element.x = this.clamp(this.snap(node.x() / this.scale, grid), 0, Math.max(0, widthMm - element.width));
             element.y = this.clamp(this.snap(node.y() / this.scale, grid), 0, Math.max(0, heightMm - element.height));
             element.rotation = node.rotation();
             node.scaleX(1);
             node.scaleY(1);
+            this.activeTransformAnchor = '';
             this.selectedElement = element;
             this.commit(validate);
             if (validate) this.validateLocal();
@@ -305,7 +384,10 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
                 width: 35,
                 height: 8,
                 layerOrder: index,
-                style: { fontSize: 10, prefixFontSize: 10, suffixFontSize: 10, fontFamily: 'Arial', fontWeight: '600', align: 'left' },
+                multiline: true,
+                locked: false,
+                preserveAspectRatio: true,
+                style: { fontSize: 10, prefixFontSize: 10, suffixFontSize: 10, fontFamily: 'TVS Auto', fontWeight: '600', align: 'left' },
                 ...partial,
             };
             this.templateJson = { ...this.templateJson, elements: [...(this.templateJson.elements || []), element] };
@@ -383,6 +465,36 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
             (this.templateJson.elements || [])
                 .filter((element) => element.type === 'qr' && (Number(element.width) < 15 || Number(element.height) < 15))
                 .forEach((element) => warnings.push({ type: 'qr_minimum_15mm', element: element.key }));
+            (this.templateJson.elements || [])
+                .filter((element) => element.type === 'barcode' && (Number(element.width) < 25 || Number(element.height) < 10))
+                .forEach((element) => warnings.push({ type: 'barcode_too_small', element: element.key }));
+            if (this.templateJson.precision203) {
+                (this.templateJson.elements || [])
+                    .filter((element) => !['barcode', 'qr', 'image', 'rectangle', 'line'].includes(element.type))
+                    .filter((element) => this.analyseTextElement(element).overflow)
+                    .forEach((element) => warnings.push({ type: 'text_overflow', element: element.key }));
+            }
+            const elements = this.templateJson.elements || [];
+            for (let first = 0; first < elements.length; first += 1) {
+                for (let second = first + 1; second < elements.length; second += 1) {
+                    const a = elements[first];
+                    const b = elements[second];
+                    if (a.type === 'line' || b.type === 'line') continue;
+                    const overlaps = Number(a.x) < Number(b.x) + Number(b.width)
+                        && Number(a.x) + Number(a.width) > Number(b.x)
+                        && Number(a.y) < Number(b.y) + Number(b.height)
+                        && Number(a.y) + Number(a.height) > Number(b.y);
+                    const contains = (outer, inner) => Number(inner.x) >= Number(outer.x)
+                        && Number(inner.y) >= Number(outer.y)
+                        && Number(inner.x) + Number(inner.width) <= Number(outer.x) + Number(outer.width)
+                        && Number(inner.y) + Number(inner.height) <= Number(outer.y) + Number(outer.height);
+                    const intentionalFrame = (a.type === 'rectangle' && contains(a, b))
+                        || (b.type === 'rectangle' && contains(b, a));
+                    if (overlaps && !intentionalFrame) {
+                        warnings.push({ type: 'overlap', elements: [a.key, b.key] });
+                    }
+                }
+            }
             this.warnings = warnings;
         },
         syncJsonText() {
@@ -421,10 +533,133 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
             return (this.templateJson.elements || []).find((item) => item.key === key) || null;
         },
         displayText(element) {
+            const previewValues = this.currentPreviewValues();
             const value = element.type === 'binding_text'
-                ? (element.previewValue || this.previewValueForBinding(element.bindingKey, element.text))
+                ? (previewValues[element.bindingKey] ?? element.previewValue ?? this.previewValueForBinding(element.bindingKey, element.text))
                 : (element.text || 'Text');
             return `${element.prefix || ''}${value}${element.suffix || ''}`;
+        },
+        currentPreviewValues() {
+            const selected = this.previewProducts.find((product) => String(product.id) === String(this.previewProductId))
+                || this.previewProducts[0];
+            return selected?.values || {};
+        },
+        changePreviewProduct() {
+            const selectedKey = this.selectedElement?.key || null;
+            this.render(selectedKey);
+        },
+        printerFontSpec(element, fontSizeOverride = null) {
+            const style = element?.style || {};
+            const fontSize = Number(fontSizeOverride ?? style.fontSize ?? 10);
+            const weight = String(style.fontWeight || '');
+            const family = String(style.fontFamily || '');
+            let font = null;
+            const explicit = family.match(/TSPL(?: Font)?\s*([1-5])/i);
+            if (explicit) font = explicit[1];
+            if (!font) {
+                if (fontSize <= 7) font = '1';
+                else if (fontSize <= 10) font = '2';
+                else if (fontSize <= 14) font = '3';
+                else if (fontSize <= 20) font = '4';
+                else font = '5';
+            }
+            const base = {
+                '1': [8, 12],
+                '2': [12, 20],
+                '3': [16, 24],
+                '4': [24, 32],
+                '5': [32, 48],
+            }[font] || [8, 12];
+            const multiplier = 1;
+            return {
+                font,
+                fontSize,
+                multiplier,
+                characterWidthDots: base[0] * multiplier,
+                characterHeightDots: base[1] * multiplier,
+            };
+        },
+        wrapPrinterText(text, charsPerLine, multiline) {
+            const normalized = String(text || '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+            if (!normalized) return [''];
+            if (!multiline) return [normalized];
+            const lines = [];
+            let line = '';
+            normalized.split(' ').forEach((word) => {
+                let remaining = word;
+                while (remaining.length > charsPerLine) {
+                    if (line) {
+                        lines.push(line);
+                        line = '';
+                    }
+                    lines.push(remaining.slice(0, charsPerLine));
+                    remaining = remaining.slice(charsPerLine);
+                }
+                if (!remaining) return;
+                const candidate = line ? `${line} ${remaining}` : remaining;
+                if (candidate.length <= charsPerLine) {
+                    line = candidate;
+                } else {
+                    if (line) lines.push(line);
+                    line = remaining;
+                }
+            });
+            if (line) lines.push(line);
+            return lines.length ? lines : [''];
+        },
+        analyseTextElement(element, fontSizeOverride = null, includeSuggestion = true) {
+            const spec = this.printerFontSpec(element, fontSizeOverride);
+            const widthDots = Math.max(1, Math.round(Number(element?.width || 1) * 8));
+            const heightDots = Math.max(1, Math.round(Number(element?.height || 1) * 8));
+            const charsPerLine = Math.max(1, Math.floor(widthDots / spec.characterWidthDots));
+            const multiline = element?.multiline === true;
+            const maxLines = multiline ? Math.max(1, Math.floor(heightDots / spec.characterHeightDots)) : 1;
+            const lines = this.wrapPrinterText(this.displayText(element), charsPerLine, multiline);
+            const overflow = lines.length > maxLines || (!multiline && lines[0].length > charsPerLine);
+            let suggestedFontSize = spec.fontSize;
+            if (overflow && includeSuggestion) {
+                for (let candidate = Math.floor(spec.fontSize) - 1; candidate >= 4; candidate -= 1) {
+                    const result = this.analyseTextElement(element, candidate, false);
+                    if (!result.overflow) {
+                        suggestedFontSize = candidate;
+                        break;
+                    }
+                }
+            }
+            return {
+                spec,
+                lines,
+                visibleLines: lines.slice(0, maxLines).map((line) => line.slice(0, charsPerLine)),
+                overflow,
+                charsPerLine,
+                maxLines,
+                suggestedFontSize,
+                summary: `Chosen ${spec.fontSize} → TVS font ${spec.font}, ${spec.characterWidthDots}×${spec.characterHeightDots} dots, ${charsPerLine} characters × ${maxLines} line${maxLines === 1 ? '' : 's'}.`,
+            };
+        },
+        selectedTextAnalysis() {
+            if (!this.selectedElement || ['barcode', 'qr', 'image', 'rectangle', 'line'].includes(this.selectedElement.type)) {
+                return null;
+            }
+            return this.analyseTextElement(this.selectedElement);
+        },
+        useSuggestedFontSize() {
+            const analysis = this.selectedTextAnalysis();
+            if (!analysis) return;
+            this.updateSelected('style.fontSize', analysis.suggestedFontSize);
+        },
+        warningMessage(warning) {
+            const messages = {
+                out_of_bounds: 'Object extends outside the printable label',
+                one_barcode_required: 'One internal inventory barcode is required',
+                one_inventory_and_one_customer_barcode_only: 'Only one inventory and one customer barcode are allowed',
+                single_qr_only: 'Only one verification QR is allowed',
+                qr_minimum_15mm: 'QR must be at least 15 × 15 mm',
+                barcode_too_small: 'Barcode may be too small to scan',
+                overlap: 'Two object areas overlap',
+                text_overflow: 'Text does not fit; open the field to see the suggested font size',
+            };
+            return messages[warning?.type] || String(warning?.type || 'Label warning').replaceAll('_', ' ');
         },
         previewValueForBinding(bindingKey, label = null) {
             const examples = {
@@ -490,21 +725,43 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
             } else {
                 element[path] = ['x', 'y', 'width', 'height', 'rotation', 'layerOrder'].includes(path) ? Number(value) : value;
             }
+            if (['x', 'y', 'width', 'height'].includes(path)) {
+                const grid = Number(this.templateJson.gridMm || (this.templateJson.precision203 ? 0.125 : 1));
+                element[path] = this.snap(Number(element[path] || 0), grid);
+                element.width = Math.max(2, Number(element.width || 2));
+                element.height = Math.max(2, Number(element.height || 2));
+                element.x = this.clamp(Number(element.x || 0), 0, Math.max(0, Number(this.templateJson.widthMm || this.widthMm) - element.width));
+                element.y = this.clamp(Number(element.y || 0), 0, Math.max(0, Number(this.templateJson.heightMm || this.heightMm) - element.height));
+            }
+            if (element.type === 'qr' && ['width', 'height'].includes(path)) {
+                const square = Math.max(15, Number(element[path] || 15));
+                element.width = square;
+                element.height = square;
+            }
             this.selectedElement = element;
             this.commit(true);
         },
         nudge(dx, dy) {
-            if (!this.selectedElement) return;
+            if (!this.selectedElement || this.selectedElement.locked) return;
             this.remember();
             const element = this.findElement(this.selectedElement.key);
             if (!element) return;
-            element.x = Number(element.x || 0) + dx;
-            element.y = Number(element.y || 0) + dy;
+            const grid = Number(this.templateJson.gridMm || (this.templateJson.precision203 ? 0.125 : 1));
+            element.x = this.clamp(
+                this.snap(Number(element.x || 0) + dx, grid),
+                0,
+                Math.max(0, Number(this.templateJson.widthMm || this.widthMm) - Number(element.width || 0)),
+            );
+            element.y = this.clamp(
+                this.snap(Number(element.y || 0) + dy, grid),
+                0,
+                Math.max(0, Number(this.templateJson.heightMm || this.heightMm) - Number(element.height || 0)),
+            );
             this.selectedElement = element;
             this.commit(true);
         },
         resizeSelected(dw, dh) {
-            if (!this.selectedElement) return;
+            if (!this.selectedElement || this.selectedElement.locked) return;
             this.remember();
             const element = this.findElement(this.selectedElement.key);
             if (!element) return;
@@ -514,7 +771,7 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
             this.commit(true);
         },
         changeFontSize(delta) {
-            if (!this.selectedElement || ['barcode', 'image', 'rectangle', 'line'].includes(this.selectedElement.type)) return;
+            if (!this.selectedElement || ['barcode', 'qr', 'image', 'rectangle', 'line'].includes(this.selectedElement.type)) return;
             const current = Number(this.selectedElement.style?.fontSize || 10);
             this.updateSelected('style.fontSize', Math.min(72, Math.max(4, current + delta)));
         },
@@ -528,18 +785,44 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
             const current = Number(this.selectedElement.layerOrder || 0);
             this.updateSelected('layerOrder', Math.max(1, current + delta));
         },
-        fitText() {
-            if (!this.selectedElement || ['barcode', 'image', 'rectangle', 'line'].includes(this.selectedElement.type)) return;
-            this.remember();
+        alignSelected(position) {
+            if (!this.selectedElement || this.selectedElement.locked) return;
             const element = this.findElement(this.selectedElement.key);
             if (!element) return;
-            const label = this.displayText(element);
-            const width = Number(element.width || 10);
-            const height = Number(element.height || 6);
-            const estimated = Math.floor(Math.min((width * 2.4) / Math.max(1, label.length / 10), height * 1.15));
-            element.style = { ...(element.style || {}), fontSize: Math.min(24, Math.max(5, estimated)) };
+            const labelWidth = Number(this.templateJson.widthMm || this.widthMm);
+            const labelHeight = Number(this.templateJson.heightMm || this.heightMm);
+            if (position === 'left') this.updateSelected('x', 2);
+            if (position === 'center') this.updateSelected('x', (labelWidth - Number(element.width || 0)) / 2);
+            if (position === 'right') this.updateSelected('x', labelWidth - Number(element.width || 0) - 2);
+            if (position === 'middle') this.updateSelected('y', (labelHeight - Number(element.height || 0)) / 2);
+        },
+        copySelectedStyle() {
+            if (!this.selectedElement || ['barcode', 'qr', 'image', 'rectangle', 'line'].includes(this.selectedElement.type)) return;
+            this.styleClipboard = this.clone(this.selectedElement.style || {});
+        },
+        pasteSelectedStyle() {
+            if (!this.selectedElement || !this.styleClipboard || ['barcode', 'qr', 'image', 'rectangle', 'line'].includes(this.selectedElement.type)) return;
+            const element = this.findElement(this.selectedElement.key);
+            if (!element) return;
+            this.remember();
+            element.style = this.clone(this.styleClipboard);
             this.selectedElement = element;
             this.commit(true);
+        },
+        orderedElements() {
+            return [...(this.templateJson.elements || [])].sort((a, b) => Number(b.layerOrder || 0) - Number(a.layerOrder || 0));
+        },
+        elementLabel(element) {
+            if (element.type === 'barcode') return element.bindingKey === 'product.customer_barcode' ? 'Customer barcode' : 'Inventory barcode';
+            if (element.type === 'qr') return 'Verification QR';
+            return element.bindingKey || element.text || element.type || 'Object';
+        },
+        selectElementByKey(key) {
+            const node = this.layer?.findOne(`.${key}`);
+            if (node) this.select(node);
+        },
+        fitText() {
+            this.useSuggestedFontSize();
         },
         remember(snapshot = null) {
             if (this.isApplyingHistory) return;

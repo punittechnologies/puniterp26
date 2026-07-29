@@ -378,6 +378,35 @@
     gap: 8px;
 }
 
+.label-preview-data-bar {
+    align-items: end;
+    background: linear-gradient(135deg, #eff6ff, #ecfeff);
+    border: 1px solid #bfdbfe;
+    border-radius: 16px;
+    display: grid;
+    gap: 14px;
+    grid-template-columns: minmax(220px, 1fr) minmax(240px, 1fr);
+    margin-top: 14px;
+    padding: 12px 14px;
+}
+
+.label-preview-data-bar label,
+.label-preview-data-bar div {
+    display: grid;
+    gap: 5px;
+}
+
+.label-preview-data-bar span {
+    color: #475569;
+    font-size: 12px;
+    font-weight: 750;
+}
+
+.label-preview-data-bar strong {
+    color: #0f172a;
+    font-weight: 900;
+}
+
 .label-canvas-wrap {
     align-items: center;
     background:
@@ -578,6 +607,81 @@
     margin-top: 10px;
 }
 
+.label-text-width-details p {
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.45;
+    margin: 8px 0 0;
+}
+
+.label-text-fit-status {
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    border-radius: 14px;
+    color: #166534;
+    display: grid;
+    gap: 5px;
+    padding: 11px 12px;
+}
+
+.label-text-fit-status.is-overflowing {
+    background: #fff1f2;
+    border-color: #fecdd3;
+    color: #be123c;
+}
+
+.label-text-fit-status span {
+    font-size: 12px;
+    font-weight: 750;
+    line-height: 1.4;
+}
+
+.label-text-fit-status button {
+    background: #fff;
+    border: 1px solid currentColor;
+    border-radius: 10px;
+    color: inherit;
+    cursor: pointer;
+    font-weight: 900;
+    justify-self: start;
+    padding: 7px 10px;
+}
+
+.label-layer-list {
+    border-top: 1px solid #dbeafe;
+    margin-top: 16px;
+    padding-top: 14px;
+}
+
+.label-layer-list summary {
+    color: #2563eb;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 900;
+    margin-bottom: 10px;
+}
+
+.label-layer-list button {
+    align-items: center;
+    background: #f8fbff;
+    border: 1px solid #dbeafe;
+    border-radius: 10px;
+    color: #1e40af;
+    display: flex;
+    justify-content: space-between;
+    margin-top: 7px;
+    min-height: 40px;
+    padding: 8px 10px;
+    text-align: left;
+    width: 100%;
+}
+
+.label-layer-list button small {
+    color: #64748b;
+    font-size: 10px;
+}
+
 .label-delete-button {
     background: #fff1f2;
     border: 1px solid #fecdd3;
@@ -586,6 +690,12 @@
     cursor: pointer;
     font-weight: 900;
     min-height: 46px;
+}
+
+@media (max-width: 900px) {
+    .label-preview-data-bar {
+        grid-template-columns: 1fr;
+    }
 }
 
 .label-delete-button:disabled {
