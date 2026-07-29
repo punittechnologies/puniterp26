@@ -58,9 +58,9 @@ trait AdminDataExchange
 
         $rows = $type === 'products'
             ? [
-                ['Product Name', 'Product Code', 'Tare Weight', 'Unit', 'Customer Barcode Enabled', 'Customer Barcode Type', 'Customer Barcode', 'Customer Barcode Caption'],
-                ['Printer', 'PRINTER-001', '0.000', 'kg', 'Yes', 'code128', 'CUSTOMER-PRINTER-001', 'CUSTOMER SKU'],
-                ['Scanner', 'SCANNER-001', '0.200', 'kg', 'No', '', '', ''],
+                ['Product Name', 'Product Code', 'Tare Weight', 'Minimum Weight (kg)', 'Maximum Weight (kg)', 'Unit', 'Customer Barcode Enabled', 'Customer Barcode Type', 'Customer Barcode', 'Customer Barcode Caption'],
+                ['Printer', 'PRINTER-001', '0.000', '1.000', '25.000', 'kg', 'Yes', 'code128', 'CUSTOMER-PRINTER-001', 'CUSTOMER SKU'],
+                ['Scanner', 'SCANNER-001', '0.200', '', '', 'kg', 'No', '', '', ''],
             ]
             : [
                 $headers = $fields ?: ['Color', 'Size'],
@@ -93,6 +93,12 @@ trait AdminDataExchange
                 $product->name,
                 $product->product_code ?? '',
                 number_format((float) ($product->default_tare_weight ?? 0), 3, '.', ''),
+                filled($product->getRawOriginal('minimum_weight'))
+                    ? number_format((float) $product->minimum_weight, 3, '.', '')
+                    : '',
+                filled($product->getRawOriginal('maximum_weight'))
+                    ? number_format((float) $product->maximum_weight, 3, '.', '')
+                    : '',
                 $product->defaultWeightUnit?->symbol ?: 'kg',
                 $product->customer_barcode_enabled ? 'Yes' : 'No',
                 $product->customer_barcode_type ?? '',
@@ -102,7 +108,7 @@ trait AdminDataExchange
             ->all();
 
         return response($this->xlsxWorkbook('Products', [
-            ['Product Name', 'Product Code', 'Tare Weight', 'Unit', 'Customer Barcode Enabled', 'Customer Barcode Type', 'Customer Barcode', 'Customer Barcode Caption'],
+            ['Product Name', 'Product Code', 'Tare Weight', 'Minimum Weight (kg)', 'Maximum Weight (kg)', 'Unit', 'Customer Barcode Enabled', 'Customer Barcode Type', 'Customer Barcode', 'Customer Barcode Caption'],
             ...$rows,
         ]), 200, [
             'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -167,6 +173,8 @@ trait AdminDataExchange
                         'name' => $record['name'],
                         'product_code' => $record['product_code'],
                         'default_tare_weight' => $record['tare_weight'],
+                        'minimum_weight' => $record['minimum_weight'],
+                        'maximum_weight' => $record['maximum_weight'],
                         'default_weight_unit_id' => $unit->id,
                         'customer_barcode_enabled' => $record['customer_barcode_enabled'],
                         'customer_barcode_type' => $record['customer_barcode_type'],
@@ -479,6 +487,8 @@ trait AdminDataExchange
             $name = trim((string) ($record['productname'] ?? ''));
             $code = strtoupper(trim((string) ($record['productcode'] ?? '')));
             $tare = trim((string) ($record['tareweight'] ?? '0'));
+            $minimumWeight = trim((string) ($record['minimumweightkg'] ?? $record['minimumweight'] ?? ''));
+            $maximumWeight = trim((string) ($record['maximumweightkg'] ?? $record['maximumweight'] ?? ''));
             $unit = strtolower(trim((string) ($record['unit'] ?? 'kg')));
             $customerBarcodeEnabledRaw = strtolower(trim((string) ($record['customerbarcodeenabled'] ?? '')));
             $customerBarcodeValue = trim((string) ($record['customerbarcode'] ?? ''));
@@ -537,6 +547,23 @@ trait AdminDataExchange
             if (! is_numeric($tare) || (float) $tare < 0) {
                 $rowErrors[] = 'Tare Weight must be zero or a positive number';
             }
+            if (($minimumWeight === '') !== ($maximumWeight === '')) {
+                $rowErrors[] = 'Minimum Weight and Maximum Weight must both be provided';
+            } elseif ($minimumWeight !== '' && $maximumWeight !== '') {
+                if (! is_numeric($minimumWeight) || (float) $minimumWeight < 0) {
+                    $rowErrors[] = 'Minimum Weight must be zero or a positive number';
+                }
+                if (! is_numeric($maximumWeight) || (float) $maximumWeight < 0) {
+                    $rowErrors[] = 'Maximum Weight must be zero or a positive number';
+                }
+                if (
+                    is_numeric($minimumWeight)
+                    && is_numeric($maximumWeight)
+                    && (float) $maximumWeight < (float) $minimumWeight
+                ) {
+                    $rowErrors[] = 'Maximum Weight must be greater than or equal to Minimum Weight';
+                }
+            }
             if (! preg_match('/^[a-z0-9._-]{1,20}$/i', $unit)) {
                 $rowErrors[] = 'Unit is invalid';
             }
@@ -558,6 +585,8 @@ trait AdminDataExchange
                 'name' => $name,
                 'product_code' => $code,
                 'tare_weight' => round((float) $tare, 6),
+                'minimum_weight' => $minimumWeight !== '' ? round((float) $minimumWeight, 6) : null,
+                'maximum_weight' => $maximumWeight !== '' ? round((float) $maximumWeight, 6) : null,
                 'unit' => $unit,
                 'customer_barcode_enabled' => $customerBarcodeEnabled,
                 'customer_barcode_type' => $customerBarcodeEnabled ? $customerBarcodeType : null,
@@ -742,7 +771,7 @@ trait AdminDataExchange
 
     private function normaliseImportHeader($value): string
     {
-        return str((string) $value)->lower()->replace([' ', '_', '-'], '')->toString();
+        return preg_replace('/[^a-z0-9]+/', '', strtolower(trim((string) $value))) ?? '';
     }
 
     private function normaliseDropdownOption(mixed $option): ?array

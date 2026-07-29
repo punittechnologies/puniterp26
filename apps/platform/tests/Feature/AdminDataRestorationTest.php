@@ -188,6 +188,65 @@ class AdminDataRestorationTest extends TestCase
         ]);
     }
 
+    public function test_product_import_accepts_optional_product_weight_range(): void
+    {
+        [$tenant, $admin] = $this->adminUser();
+
+        $this->actingAs($admin)->post('/import/products', [
+            'file' => UploadedFile::fake()->createWithContent(
+                'products.csv',
+                "Product Name,Product Code,Minimum Weight (kg),Maximum Weight (kg)\n".
+                "Weighted Product,WEIGHT-001,10.500,25.750\n".
+                "Unrestricted Product,WEIGHT-002,,\n",
+            ),
+        ])->assertRedirect('/import');
+
+        $this->actingAs($admin)->get('/import')
+            ->assertOk()
+            ->assertSee('10.500')
+            ->assertSee('25.750')
+            ->assertSee('Confirm Product Import');
+
+        $this->actingAs($admin)->post('/import/products', ['confirm' => '1'])
+            ->assertRedirect('/import')
+            ->assertSessionHasNoErrors();
+
+        $this->assertDatabaseHas('products', [
+            'tenant_id' => $tenant->id,
+            'product_code' => 'WEIGHT-001',
+            'minimum_weight' => 10.500,
+            'maximum_weight' => 25.750,
+        ]);
+        $this->assertDatabaseHas('products', [
+            'tenant_id' => $tenant->id,
+            'product_code' => 'WEIGHT-002',
+            'minimum_weight' => null,
+            'maximum_weight' => null,
+        ]);
+    }
+
+    public function test_product_import_rejects_invalid_or_incomplete_product_weight_ranges(): void
+    {
+        [, $admin] = $this->adminUser();
+
+        $this->actingAs($admin)->post('/import/products', [
+            'file' => UploadedFile::fake()->createWithContent(
+                'products.csv',
+                "Product Name,Minimum Weight (kg),Maximum Weight (kg)\n".
+                "Incomplete Range,10,\n".
+                "Reversed Range,20,10\n".
+                "Negative Range,-1,10\n",
+            ),
+        ])->assertRedirect('/import');
+
+        $this->actingAs($admin)->get('/import')
+            ->assertOk()
+            ->assertSee('Minimum Weight and Maximum Weight must both be provided')
+            ->assertSee('Maximum Weight must be greater than or equal to Minimum Weight')
+            ->assertSee('Minimum Weight must be zero or a positive number')
+            ->assertDontSee('Confirm Product Import');
+    }
+
     public function test_product_export_is_import_compatible_and_existing_rows_are_skipped(): void
     {
         [$tenant, $admin] = $this->adminUser();
