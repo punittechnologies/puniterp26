@@ -196,6 +196,7 @@ Route::middleware('auth')->group(function (): void {
     Route::delete('/app-users/{user}', [AdminPanelController::class, 'userDestroy'])->name('admin.app-users.destroy');
     Route::delete('/admin/users/{user}', [AdminPanelController::class, 'userDestroy'])->name('admin.users.destroy');
     Route::post('/admin/roles', [AdminPanelController::class, 'roleStore'])->name('admin.roles.store');
+    Route::delete('/products/clear', [AdminPanelController::class, 'productsClear'])->name('admin.products.clear');
     Route::get('/superadmin/onboarding', [AdminPanelController::class, 'superAdminOnboarding'])->name('admin.superadmin.onboarding');
     Route::post('/superadmin/onboarding', [AdminPanelController::class, 'superAdminOnboardingSave'])->name('admin.superadmin.onboarding.save');
     Route::get('/superadmin/admins', [AdminPanelController::class, 'superAdminAdmins'])->name('admin.superadmin.admins');

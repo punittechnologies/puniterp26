@@ -115,4 +115,27 @@
         </div>
         {{ $products->links() }}
     </div>
+
+    @if ($canBulkDelete)
+        <div class="card">
+            <div class="card-head">
+                <div>
+                    <h2>Delete All Product Setup</h2>
+                    <p>Admin-only action for this company. Currently {{ $bulkDeleteCounts['products'] }} products and {{ $bulkDeleteCounts['details'] }} product-detail fields.</p>
+                </div>
+            </div>
+            <p class="muted">This removes products, product variants, product batches, product-detail fields and their selectable values. Historical weighments, inventory transactions, dispatches, reports, users, customers and label templates remain unchanged. No automatic backup is created.</p>
+            <form method="POST" action="{{ route('admin.products.clear') }}" class="form-grid" onsubmit="return confirm('This will remove every product and product-detail configuration for this company. Historical transactions will remain. Continue?');">
+                @csrf
+                @method('DELETE')
+                <label class="full">Type DELETE ALL PRODUCTS to confirm
+                    <input name="confirm" placeholder="DELETE ALL PRODUCTS" required autocomplete="off">
+                </label>
+                <label class="full">Admin password
+                    <input name="password" type="password" placeholder="Enter your login password" required autocomplete="current-password">
+                </label>
+                <button class="btn destructive full">Delete all products and product details</button>
+            </form>
+        </div>
+    @endif
 </div>

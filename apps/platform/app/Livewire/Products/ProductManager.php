@@ -3,6 +3,7 @@
 namespace App\Livewire\Products;
 
 use App\Models\InventoryTransaction;
+use App\Models\ProductConfiguration\DynamicFieldDefinition;
 use App\Models\ProductConfiguration\Product;
 use App\Models\ProductConfiguration\UnitConversionRule;
 use App\Models\ProductionTransaction;
@@ -185,9 +186,18 @@ class ProductManager extends Component
     public function render(): mixed
     {
         $tenantId = $this->tenantId();
+        $canBulkDelete = Auth::user()?->isSuperAdmin() || Auth::user()?->hasPermission('users.manage');
 
         return view('livewire.products.product-manager', [
             'customerBarcodeTypes' => ProductCustomerBarcode::TYPES,
+            'canBulkDelete' => $canBulkDelete,
+            'bulkDeleteCounts' => $canBulkDelete ? [
+                'products' => Product::query()->where('tenant_id', $tenantId)->count(),
+                'details' => DynamicFieldDefinition::query()
+                    ->where('tenant_id', $tenantId)
+                    ->where('entity_type', 'product_variant')
+                    ->count(),
+            ] : ['products' => 0, 'details' => 0],
             'products' => Product::query()
                 ->where('tenant_id', $tenantId)
                 ->when($this->search, fn ($query) => $query->where('name', 'like', '%'.$this->search.'%'))

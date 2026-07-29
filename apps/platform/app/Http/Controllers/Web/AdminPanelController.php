@@ -18,9 +18,12 @@ use App\Models\Permission;
 use App\Models\ProductConfiguration\DynamicFieldDefinition;
 use App\Models\ProductConfiguration\Product;
 use App\Models\ProductConfiguration\ProductAttribute;
+use App\Models\ProductConfiguration\ProductBatch;
 use App\Models\ProductConfiguration\ProductCategory;
 use App\Models\ProductConfiguration\ProductDeviceAssignment;
 use App\Models\ProductConfiguration\ProductVariant;
+use App\Models\ProductConfiguration\UnitConversionRule;
+use App\Models\ProductConfiguration\WeightRule;
 use App\Models\ProductionTransaction;
 use App\Models\Role;
 use App\Models\ScaleProfile;
@@ -832,6 +835,119 @@ class AdminPanelController extends Controller
         });
 
         return back()->with('status', 'Inventory, inward, dispatch and barcode transaction data cleared for this tenant. Products, product details, customers and settings were kept.');
+    }
+
+    public function productsClear(Request $request): RedirectResponse
+    {
+        abort_unless(Auth::user()?->isSuperAdmin() || Auth::user()?->hasPermission('users.manage'), 403);
+
+        $tenantId = $this->tenantId();
+        $data = $request->validate([
+            'confirm' => ['required', 'string', 'in:DELETE ALL PRODUCTS'],
+            'password' => ['required', 'string'],
+        ]);
+
+        if (! Hash::check($data['password'], Auth::user()?->password ?? '')) {
+            return back()->withErrors(['password' => 'Admin password is incorrect.']);
+        }
+
+        $counts = DB::transaction(function () use ($tenantId, $data): array {
+            $definitionIds = DynamicFieldDefinition::withTrashed()
+                ->where('tenant_id', $tenantId)
+                ->where('entity_type', 'product_variant')
+                ->pluck('id');
+            $attributeIds = ProductAttribute::withTrashed()
+                ->where('tenant_id', $tenantId)
+                ->pluck('id');
+            $counts = [
+                'products' => Product::withTrashed()->where('tenant_id', $tenantId)->count(),
+                'product_variants' => ProductVariant::withTrashed()->where('tenant_id', $tenantId)->count(),
+                'product_batches' => ProductBatch::withTrashed()->where('tenant_id', $tenantId)->count(),
+                'product_detail_fields' => $definitionIds->count(),
+                'product_detail_values' => $definitionIds->isEmpty()
+                    ? 0
+                    : DB::table('dynamic_field_values')->whereIn('dynamic_field_definition_id', $definitionIds)->count(),
+                'product_attributes' => $attributeIds->count(),
+                'product_attribute_values' => $attributeIds->isEmpty()
+                    ? 0
+                    : DB::table('product_attribute_values')->whereIn('product_attribute_id', $attributeIds)->count(),
+            ];
+
+            DynamicFieldDefinition::withTrashed()
+                ->where('tenant_id', $tenantId)
+                ->where('entity_type', 'product_variant')
+                ->forceDelete();
+            ProductAttribute::withTrashed()
+                ->where('tenant_id', $tenantId)
+                ->forceDelete();
+
+            ProductBatch::query()
+                ->where('tenant_id', $tenantId)
+                ->update(['is_active' => false, 'updated_by' => Auth::id()]);
+            ProductBatch::query()->where('tenant_id', $tenantId)->delete();
+
+            ProductDeviceAssignment::query()
+                ->where('tenant_id', $tenantId)
+                ->update(['is_active' => false, 'updated_by' => Auth::id()]);
+            UnitConversionRule::query()
+                ->where('tenant_id', $tenantId)
+                ->update(['is_active' => false, 'updated_by' => Auth::id()]);
+            WeightRule::query()
+                ->where('tenant_id', $tenantId)
+                ->update(['is_active' => false, 'updated_by' => Auth::id()]);
+
+            ProductVariant::withTrashed()
+                ->where('tenant_id', $tenantId)
+                ->get()
+                ->each(function (ProductVariant $variant): void {
+                    $wasDeleted = $variant->trashed();
+                    $variant->forceFill([
+                        'name' => 'Deleted product detail '.$variant->id,
+                        'variant_code' => 'DELETED-'.$variant->id,
+                        'sku' => null,
+                        'barcode' => null,
+                        'is_active' => false,
+                        'configuration_version' => $variant->configuration_version + 1,
+                        'updated_by' => Auth::id(),
+                    ])->save();
+                    if (! $wasDeleted) {
+                        $variant->delete();
+                    }
+                });
+
+            Product::withTrashed()
+                ->where('tenant_id', $tenantId)
+                ->get()
+                ->each(function (Product $product): void {
+                    $wasDeleted = $product->trashed();
+                    $product->forceFill([
+                        'name' => 'Deleted product '.$product->id,
+                        'product_code' => 'DELETED-'.$product->id,
+                        'sku' => null,
+                        'is_active' => false,
+                        'configuration_version' => $product->configuration_version + 1,
+                        'updated_by' => Auth::id(),
+                    ])->save();
+                    if (! $wasDeleted) {
+                        $product->delete();
+                    }
+                });
+
+            $this->audit('products.cleared', Auth::user(), $counts, [
+                'confirm' => $data['confirm'],
+                'history_preserved' => true,
+            ]);
+
+            return $counts;
+        });
+
+        $removed = $counts['products'];
+        $details = $counts['product_detail_fields'];
+
+        return redirect()->route('admin.products')->with(
+            'status',
+            "Product setup cleared for this company: {$removed} products and {$details} product-detail fields removed. Historical transactions and reports were preserved.",
+        );
     }
 
     public function customers(Request $request): View

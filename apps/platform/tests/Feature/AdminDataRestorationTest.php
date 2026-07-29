@@ -5,7 +5,11 @@ namespace Tests\Feature;
 use App\Models\InventoryTransaction;
 use App\Models\Permission;
 use App\Models\ProductConfiguration\DynamicFieldDefinition;
+use App\Models\ProductConfiguration\DynamicFieldValue;
 use App\Models\ProductConfiguration\Product;
+use App\Models\ProductConfiguration\ProductBatch;
+use App\Models\ProductConfiguration\ProductVariant;
+use App\Models\ProductionTransaction;
 use App\Models\Role;
 use App\Models\Tenant;
 use App\Models\User;
@@ -339,6 +343,114 @@ class AdminDataRestorationTest extends TestCase
                 ->where('key', 'warehouse-manager')
                 ->count(),
         );
+    }
+
+    public function test_admin_can_clear_only_their_tenant_product_setup_while_preserving_history(): void
+    {
+        [$tenant, $admin] = $this->adminUser();
+        $product = $this->product($tenant, 'Old Product', 'OLD-PRODUCT');
+        $variant = ProductVariant::query()->create([
+            'tenant_id' => $tenant->id,
+            'product_id' => $product->id,
+            'name' => 'Old Detail',
+            'variant_code' => 'OLD-DETAIL',
+            'is_active' => true,
+        ]);
+        ProductBatch::query()->create([
+            'tenant_id' => $tenant->id,
+            'product_id' => $product->id,
+            'batch_name' => 'Old Batch',
+            'attribute_key' => 'lot',
+            'attribute_label' => 'Lot',
+            'attribute_value' => 'A',
+            'is_active' => true,
+        ]);
+        $field = DynamicFieldDefinition::query()->create([
+            'tenant_id' => $tenant->id,
+            'field_label' => 'Color',
+            'internal_key' => 'color',
+            'entity_type' => 'product_variant',
+            'data_type' => 'dropdown',
+            'dropdown_options' => [['label' => 'Red', 'value' => 'red']],
+            'is_active' => true,
+        ]);
+        DynamicFieldValue::query()->create([
+            'tenant_id' => $tenant->id,
+            'dynamic_field_definition_id' => $field->id,
+            'entity_type' => 'product_variant',
+            'entity_id' => $variant->id,
+            'text_value' => 'red',
+        ]);
+        $history = ProductionTransaction::query()->create([
+            'tenant_id' => $tenant->id,
+            'product_id' => $product->id,
+            'variant_id' => $variant->id,
+            'serial_number' => 'SER-HISTORY',
+            'barcode_value' => 'BAR-HISTORY',
+            'product_snapshot' => ['name' => 'Old Product'],
+            'variant_snapshot' => ['name' => 'Old Detail'],
+            'gross_weight' => 2,
+            'tare_weight' => 0,
+            'net_weight' => 2,
+            'captured_at' => now(),
+        ]);
+
+        $otherTenant = Tenant::query()->create([
+            'name' => 'Other Tenant',
+            'code' => 'OTHER-CLEAR',
+            'status' => 'active',
+        ]);
+        $otherProduct = $this->product($otherTenant, 'Other Product', 'OTHER-PRODUCT');
+
+        $this->actingAs($admin)->get('/products')
+            ->assertOk()
+            ->assertSee('Delete All Product Setup')
+            ->assertSee('No automatic backup is created.');
+
+        $this->actingAs($admin)->delete('/products/clear', [
+            'confirm' => 'DELETE ALL PRODUCTS',
+            'password' => 'password',
+        ])->assertRedirect('/products')
+            ->assertSessionHasNoErrors();
+
+        $this->assertSame(0, Product::query()->where('tenant_id', $tenant->id)->count());
+        $this->assertSame(1, Product::onlyTrashed()->where('tenant_id', $tenant->id)->count());
+        $this->assertStringStartsWith('DELETED-', Product::withTrashed()->findOrFail($product->id)->product_code);
+        $this->assertSame(0, ProductVariant::query()->where('tenant_id', $tenant->id)->count());
+        $this->assertSame(0, ProductBatch::query()->where('tenant_id', $tenant->id)->count());
+        $this->assertSame(0, DynamicFieldDefinition::withTrashed()->where('tenant_id', $tenant->id)->count());
+        $this->assertSame(0, DynamicFieldValue::query()->where('tenant_id', $tenant->id)->count());
+        $this->assertDatabaseHas('production_transactions', ['id' => $history->id]);
+        $this->assertDatabaseHas('products', ['id' => $otherProduct->id, 'is_active' => true]);
+        $this->assertDatabaseHas('audit_logs', [
+            'tenant_id' => $tenant->id,
+            'action' => 'products.cleared',
+        ]);
+    }
+
+    public function test_product_setup_clear_requires_exact_confirmation_password_and_admin_permission(): void
+    {
+        [$tenant, $admin] = $this->adminUser();
+        $product = $this->product($tenant, 'Protected Product', 'PROTECTED');
+
+        $this->actingAs($admin)->delete('/products/clear', [
+            'confirm' => 'DELETE PRODUCTS',
+            'password' => 'password',
+        ])->assertSessionHasErrors('confirm');
+        $this->assertDatabaseHas('products', ['id' => $product->id, 'is_active' => true]);
+
+        $this->actingAs($admin)->delete('/products/clear', [
+            'confirm' => 'DELETE ALL PRODUCTS',
+            'password' => 'wrong-password',
+        ])->assertSessionHasErrors('password');
+        $this->assertDatabaseHas('products', ['id' => $product->id, 'is_active' => true]);
+
+        [, $operator] = $this->adminUser(['products.view']);
+        $this->actingAs($operator)->delete('/products/clear', [
+            'confirm' => 'DELETE ALL PRODUCTS',
+            'password' => 'password',
+        ])->assertForbidden();
+        $this->assertDatabaseHas('products', ['id' => $product->id, 'is_active' => true]);
     }
 
     public function test_restored_data_actions_require_their_permissions(): void
