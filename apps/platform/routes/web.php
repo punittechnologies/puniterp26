@@ -139,6 +139,8 @@ Route::post('/onboarding', function (Request $request) {
 })->name('onboarding.store');
 
 Route::middleware('auth')->group(function (): void {
+    Route::get('/account/password', [AdminPanelController::class, 'accountPassword'])->name('admin.account.password');
+    Route::patch('/account/password', [AdminPanelController::class, 'accountPasswordUpdate'])->name('admin.account.password.update');
     Route::middleware('permission:products.view')->group(function (): void {
         Route::get('/batches', [AdminBatchController::class, 'index'])->name('admin.batches');
         Route::post('/batches', [AdminBatchController::class, 'store'])->name('admin.batches.store');
@@ -196,6 +198,9 @@ Route::middleware('auth')->group(function (): void {
     Route::post('/admin/roles', [AdminPanelController::class, 'roleStore'])->name('admin.roles.store');
     Route::get('/superadmin/onboarding', [AdminPanelController::class, 'superAdminOnboarding'])->name('admin.superadmin.onboarding');
     Route::post('/superadmin/onboarding', [AdminPanelController::class, 'superAdminOnboardingSave'])->name('admin.superadmin.onboarding.save');
+    Route::get('/superadmin/admins', [AdminPanelController::class, 'superAdminAdmins'])->name('admin.superadmin.admins');
+    Route::patch('/superadmin/admins/{user}/password', [AdminPanelController::class, 'superAdminAdminPasswordUpdate'])
+        ->name('admin.superadmin.admins.password');
     Route::get('/admin/{section}', [AdminPanelController::class, 'resource'])->name('admin.resource');
 
     Route::get('/products', function () {

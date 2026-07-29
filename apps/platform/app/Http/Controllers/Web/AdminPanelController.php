@@ -165,6 +165,92 @@ class AdminPanelController extends Controller
         return back()->with('status', 'Onboarding access created. Customer can now create their admin login.');
     }
 
+    public function accountPassword(): View
+    {
+        return view('admin.account.password', [
+            'title' => 'Change Password',
+        ]);
+    }
+
+    public function accountPasswordUpdate(Request $request): RedirectResponse
+    {
+        $user = Auth::user();
+        abort_unless($user, 403);
+
+        $data = $request->validate([
+            'current_password' => ['required', 'current_password'],
+            'password' => ['required', 'confirmed', Password::min(8)->letters()->numbers()],
+        ]);
+
+        $user->forceFill([
+            'password' => Hash::make($data['password']),
+            'password_changed_at' => now(),
+            'remember_token' => str()->random(60),
+            'updated_by' => $user->id,
+        ])->save();
+        $user->tokens()->delete();
+        $request->session()->regenerate();
+        $this->audit('user.password.changed', $user, [], [], [
+            'method' => 'self_service',
+        ]);
+
+        return back()->with('status', 'Your password was changed successfully. Other app sessions were signed out.');
+    }
+
+    public function superAdminAdmins(Request $request): View
+    {
+        abort_unless(Auth::user()?->isSuperAdmin(), 403);
+
+        $search = trim($request->string('search')->toString());
+        $admins = User::query()
+            ->with(['tenant:id,name,code', 'roles:id,name,key'])
+            ->where('app_only', false)
+            ->where('id', '!=', Auth::id())
+            ->when($search !== '', function ($query) use ($search): void {
+                $query->where(function ($query) use ($search): void {
+                    $query->where('id', $search)
+                        ->orWhere('name', 'like', "%{$search}%")
+                        ->orWhere('email', 'like', "%{$search}%")
+                        ->orWhere('phone', 'like', "%{$search}%")
+                        ->orWhereHas('tenant', fn ($tenant) => $tenant->where('name', 'like', "%{$search}%"));
+                });
+            })
+            ->latest()
+            ->paginate(25)
+            ->withQueryString();
+
+        return view('admin.superadmin.admins', [
+            'title' => 'Company Admins',
+            'admins' => $admins,
+            'search' => $search,
+        ]);
+    }
+
+    public function superAdminAdminPasswordUpdate(Request $request, User $user): RedirectResponse
+    {
+        abort_unless(Auth::user()?->isSuperAdmin(), 403);
+        abort_if($user->isSuperAdmin() || $user->app_only, 404);
+
+        $data = $request->validate([
+            'password' => ['required', 'confirmed', Password::min(8)->letters()->numbers()],
+        ]);
+
+        $user->forceFill([
+            'password' => Hash::make($data['password']),
+            'password_changed_at' => now(),
+            'remember_token' => str()->random(60),
+            'updated_by' => Auth::id(),
+        ])->save();
+        $user->tokens()->delete();
+        DB::table('sessions')->where('user_id', $user->id)->delete();
+        $this->audit('user.password.reset_by_superadmin', $user, [], [], [
+            'target_tenant_id' => $user->tenant_id,
+            'target_email' => $user->email,
+        ]);
+
+        return back()->with('status', "Password reset for {$user->email}. Share the new password securely; it cannot be viewed again.");
+    }
+
     public function appUsers(Request $request): View
     {
         abort_unless(Auth::user()?->hasPermission('users.manage'), 403);

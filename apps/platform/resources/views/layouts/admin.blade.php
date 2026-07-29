@@ -25,6 +25,7 @@
         ],
         'Administration' => [
             ['Superadmin Onboarding', route('admin.superadmin.onboarding'), 'superadmin.only'],
+            ['Company Admins', route('admin.superadmin.admins'), 'superadmin.only'],
             ['App Users', route('admin.app-users'), 'users.manage'],
             ['Users', route('admin.resource', 'users'), 'users.manage'],
             ['Roles', route('admin.resource', 'roles'), 'roles.manage'],
@@ -108,6 +109,7 @@
                     </form>
                     <span class="status-pill success">Online</span>
                     <span class="avatar">{{ strtoupper(substr($user?->name ?? 'A', 0, 1)) }}</span>
+                    <a class="btn" href="{{ route('admin.account.password') }}">Password</a>
                     <form method="POST" action="{{ route('logout') }}">@csrf<button class="btn">Logout</button></form>
                 </div>
             </header>
