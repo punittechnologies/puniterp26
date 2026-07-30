@@ -284,6 +284,41 @@ void main() {
     expect(RegExp(r'TEXT 40,\d+,"1"').allMatches(tspl), hasLength(1));
   });
 
+  test('line elements emit printable TSPL bars in both orientations', () {
+    final tspl = BluetoothThermalPrinterAdapter().debugTspl(
+      const PrintJob(
+        jobId: 'job-lines',
+        template: {
+          'widthMm': 75,
+          'heightMm': 75,
+          'elements': [
+            {
+              'type': 'line',
+              'x': 5,
+              'y': 10,
+              'width': 45,
+              'height': 1,
+              'rotation': 0,
+            },
+            {
+              'type': 'line',
+              'x': 60,
+              'y': 10,
+              'width': 20,
+              'height': 0.5,
+              'rotation': 90,
+            },
+            {'type': 'barcode', 'x': 5, 'y': 52, 'width': 65, 'height': 17},
+          ],
+        },
+        data: {'barcode_value': 'PHK123'},
+      ),
+    );
+
+    expect(tspl, contains('BAR 40,80,360,8'));
+    expect(tspl, contains('BAR 480,80,4,160'));
+  });
+
   test('Web Label emits a firmware-safe QR bitmap without changing barcode', () {
     final adapter = BluetoothThermalPrinterAdapter(qrPrintingEnabled: true);
     const job = PrintJob(

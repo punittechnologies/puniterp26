@@ -1040,6 +1040,19 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
         continue;
       }
 
+      if (type == 'line') {
+        final x = _dots(element['x']);
+        final y = _dots(element['y']);
+        final width = _dots(element['width']).clamp(1, widthMm * 8);
+        final height = _dots(element['height']).clamp(1, heightMm * 8);
+        final rotation = _printerRotation(element['rotation']);
+        final vertical = rotation == 90 || rotation == 270;
+        lines.add(
+          vertical ? 'BAR $x,$y,$height,$width' : 'BAR $x,$y,$width,$height',
+        );
+        continue;
+      }
+
       if (type == 'rectangle') {
         final border = (element['border'] as Map?) ?? const {};
         final thicknessMm = _num(border['width']) ?? .35;
