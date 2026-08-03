@@ -1,0 +1,82 @@
+name: Regression guard
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    name: Web tests and protected features
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/platform
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, pdo_sqlite
+          coverage: none
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/platform/package-lock.json
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Prepare test environment
+        run: |
+          cp .env.example .env
+          touch database/database.sqlite
+          php artisan key:generate
+
+      - name: Verify protected features
+        working-directory: .
+        run: bash scripts/verify-protected-features.sh
+
+      - name: Run web tests
+        run: php artisan test
+
+      - name: Build web assets
+        run: |
+          npm ci
+          npm run build
+
+  flutter:
+    name: Flutter analysis and tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/tablet
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.1'
+          channel: stable
+          cache: true
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Analyze Flutter
+        run: flutter analyze
+
+      - name: Run Flutter tests
+        run: flutter test
