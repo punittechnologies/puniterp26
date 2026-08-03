@@ -40,6 +40,13 @@ conflict before editing.
 Employees should start new Codex work with the prompt in
 `docs/EMPLOYEE_CODEX_START_PROMPT.md`.
 
+The protection files themselves are owner-controlled. An employee or agent must
+not modify `AGENTS.md`, `docs/PROTECTED_FEATURE_BASELINE.md`,
+`scripts/verify-protected-features.sh`, the pull-request template, or the
+regression workflow merely to make a failing check pass. Any baseline change
+requires an explicit owner request and must be isolated in its own reviewed
+commit.
+
 ## Required workflow
 
 1. Fetch `origin` and start from the latest `origin/main`.
