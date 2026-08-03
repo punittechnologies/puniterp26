@@ -28,6 +28,10 @@ use production credentials. Commit only to the task branch and give me the
 branch name, commit, tests, affected files, risks, and exact deployment plan
 for approval.
 
+Do not edit AGENTS.md, the protected feature baseline, the protection script,
+pull-request template, or regression workflow to bypass a failing check. Report
+the conflict to me instead.
+
 Specific task:
 [WRITE THE REQUEST HERE]
 ```

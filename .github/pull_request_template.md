@@ -21,6 +21,7 @@ List the existing workflows inspected and confirmed unchanged.
 - [ ] Web tests/build pass, when applicable.
 - [ ] Flutter analysis/tests pass, when applicable.
 - [ ] I reviewed the complete diff for accidental deletions.
+- [ ] I did not weaken or modify protection files to make checks pass.
 - [ ] No secrets, `.env`, keystores, dependencies, APK intermediates, caches, or
       generated build folders are included.
 
