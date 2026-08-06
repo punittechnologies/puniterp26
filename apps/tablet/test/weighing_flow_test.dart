@@ -57,7 +57,7 @@ void main() {
     );
   });
 
-  test('weight range blocks auto capture but not manual capture mode', () {
+  test('weight range blocks both automatic and manual capture paths', () {
     final first = DateTime(2026);
     const computation = WeightComputation(
       gross: 8,
@@ -80,27 +80,31 @@ void main() {
     expect(autoSession.update(readingAt(0), computation), isFalse);
     expect(autoSession.update(readingAt(600), computation), isFalse);
     expect(autoSession.state, CaptureState.validated);
-
-    final manualSession = WeighingSession(
-      stabilityDuration: const Duration(milliseconds: 500),
-    );
+    expect(WeighingController.isWithinAllowedRange(computation), isFalse);
     expect(
-      manualSession.update(
-        readingAt(0),
-        computation,
-        enforceWeightRange: false,
-      ),
-      isFalse,
-    );
-    expect(
-      manualSession.update(
-        readingAt(600),
-        computation,
-        enforceWeightRange: false,
+      WeighingController.isWithinAllowedRange(
+        const WeightComputation(
+          gross: 10,
+          tare: 0,
+          net: 10,
+          unit: 'kg',
+          rangeStatus: WeightRangeStatus.accepted,
+        ),
       ),
       isTrue,
     );
-    expect(manualSession.state, CaptureState.readyToCapture);
+    expect(
+      WeighingController.isWithinAllowedRange(
+        const WeightComputation(
+          gross: 10,
+          tare: 0,
+          net: 10,
+          unit: 'kg',
+          rangeStatus: WeightRangeStatus.noRule,
+        ),
+      ),
+      isTrue,
+    );
   });
 
   test('captures production locally and adds inventory', () async {

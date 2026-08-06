@@ -1039,11 +1039,7 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
       variant: null,
       manualTare: manualTare,
     );
-    final ready = session.update(
-      value,
-      computed,
-      enforceWeightRange: autoCapture,
-    );
+    final ready = session.update(value, computed);
     setState(() {
       reading = value;
       computation = computed;
@@ -1077,6 +1073,13 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
     if (reading.grossWeight < 0 || computed.gross <= 0 || computed.net <= 0) {
       _showCornerMessage(
         'Negative or zero weight cannot be saved. Remove item, zero scale, then weigh again.',
+        error: true,
+      );
+      return null;
+    }
+    if (!WeighingController.isWithinAllowedRange(computed)) {
+      _showCornerMessage(
+        'Print stopped: the net weight is outside this product’s configured minimum and maximum range.',
         error: true,
       );
       return null;
