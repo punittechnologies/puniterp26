@@ -111,6 +111,13 @@ class WeighingController {
         computation.rangeStatus != WeightRangeStatus.overweight;
   }
 
+  static bool shouldAutoSaveAndPrint({
+    required bool autoCaptureEnabled,
+    required bool readingReady,
+  }) {
+    return autoCaptureEnabled && readingReady;
+  }
+
   WeightComputation compute({
     required ScaleReading reading,
     required ProductConfig? product,

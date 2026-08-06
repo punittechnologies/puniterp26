@@ -1044,8 +1044,11 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
       reading = value;
       computation = computed;
     });
-    if (autoCapture && ready) {
-      await _capture();
+    if (WeighingController.shouldAutoSaveAndPrint(
+      autoCaptureEnabled: autoCapture,
+      readingReady: ready,
+    )) {
+      await _saveAndPrint();
     }
   }
 
@@ -2164,6 +2167,9 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
             value: autoCapture,
             onChanged: (value) => setState(() => autoCapture = value),
             title: const Text('Auto capture'),
+            subtitle: const Text(
+              'Automatically save and print when weight is stable and within range.',
+            ),
           ),
         ],
       ),

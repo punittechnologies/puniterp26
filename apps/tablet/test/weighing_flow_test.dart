@@ -107,6 +107,30 @@ void main() {
     );
   });
 
+  test('auto capture requests save and print only for a ready reading', () {
+    expect(
+      WeighingController.shouldAutoSaveAndPrint(
+        autoCaptureEnabled: true,
+        readingReady: true,
+      ),
+      isTrue,
+    );
+    expect(
+      WeighingController.shouldAutoSaveAndPrint(
+        autoCaptureEnabled: true,
+        readingReady: false,
+      ),
+      isFalse,
+    );
+    expect(
+      WeighingController.shouldAutoSaveAndPrint(
+        autoCaptureEnabled: false,
+        readingReady: true,
+      ),
+      isFalse,
+    );
+  });
+
   test('captures production locally and adds inventory', () async {
     final database = LocalDatabase.memory();
     final production = ProductionRepository(database: database);
