@@ -82,6 +82,7 @@ class ScaleReading {
     required this.isStable,
     required this.raw,
     required this.recordedAt,
+    this.stabilitySignalPresent = true,
     this.deviceId,
     this.profileId,
   });
@@ -91,6 +92,7 @@ class ScaleReading {
   final bool isStable;
   final String raw;
   final DateTime recordedAt;
+  final bool stabilitySignalPresent;
   final String? deviceId;
   final String? profileId;
 
@@ -101,6 +103,7 @@ class ScaleReading {
     'grossWeight': grossWeight,
     'unit': unit,
     'isStable': isStable,
+    'stabilitySignalPresent': stabilitySignalPresent,
     'raw': raw,
     'recordedAt': recordedAt.toIso8601String(),
     'deviceId': deviceId,
