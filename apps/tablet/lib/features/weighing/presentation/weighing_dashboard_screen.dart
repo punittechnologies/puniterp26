@@ -236,6 +236,38 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
       scaleStatus == ScaleConnectionStatus.receiving ||
       scaleStatus == ScaleConnectionStatus.connected;
 
+  String get _autoCaptureStatus {
+    if (!autoCapture) {
+      return 'Automatically save and print when weight is stable and within range.';
+    }
+    if (!_scaleConnected) {
+      return 'Waiting for the weighing scale to connect.';
+    }
+
+    final computed = computation;
+    if (computed == null || computed.gross <= session.resetThreshold) {
+      return 'Ready. Place an item on the scale.';
+    }
+    if (!WeighingController.isWithinAllowedRange(computed)) {
+      return 'Waiting: net weight is outside the product range.';
+    }
+
+    return switch (session.state) {
+      CaptureState.weightDetected || CaptureState.stabilising =>
+        reading.stabilitySignalPresent
+            ? 'Waiting for the scale to report a stable weight.'
+            : 'Checking numerical stability… keep the item still.',
+      CaptureState.stable ||
+      CaptureState.readyToCapture => 'Weight ready. Saving and printing.',
+      CaptureState.saving => 'Saving the weighment.',
+      CaptureState.saved || CaptureState.waitingForItemRemoval =>
+        'Printed. Remove the item until the scale returns to zero.',
+      CaptureState.validated =>
+        'Waiting: net weight is outside the product range.',
+      CaptureState.idle => 'Ready. Place an item on the scale.',
+    };
+  }
+
   @override
   void initState() {
     super.initState();
@@ -2167,9 +2199,7 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
             value: autoCapture,
             onChanged: (value) => setState(() => autoCapture = value),
             title: const Text('Auto capture'),
-            subtitle: const Text(
-              'Automatically save and print when weight is stable and within range.',
-            ),
+            subtitle: Text(_autoCaptureStatus),
           ),
         ],
       ),

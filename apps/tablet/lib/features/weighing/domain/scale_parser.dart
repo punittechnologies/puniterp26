@@ -77,9 +77,16 @@ class ScaleReadingParser {
       );
     }
 
-    final stable =
-        profile.stableTokens.any(text.contains) &&
-        !profile.unstableTokens.any(text.contains);
+    final normalizedText = text.toUpperCase();
+    final stableSignal = profile.stableTokens.any(
+      (token) =>
+          token.isNotEmpty && normalizedText.contains(token.toUpperCase()),
+    );
+    final unstableSignal = profile.unstableTokens.any(
+      (token) =>
+          token.isNotEmpty && normalizedText.contains(token.toUpperCase()),
+    );
+    final stable = stableSignal && !unstableSignal;
     final weightText = _weightText(text);
     if (weightText == null) return null;
     final unit = _unit(text);
@@ -95,6 +102,7 @@ class ScaleReadingParser {
       grossWeight: value,
       unit: unit,
       isStable: stable,
+      stabilitySignalPresent: stableSignal || unstableSignal,
       raw: raw,
       recordedAt: DateTime.now(),
     );
@@ -139,7 +147,7 @@ class WeightStabilityDetector {
   ScaleReading? _last;
 
   bool add(ScaleReading reading) {
-    if (!reading.isStable) {
+    if (reading.stabilitySignalPresent && !reading.isStable) {
       _first = null;
       _last = reading;
       return false;

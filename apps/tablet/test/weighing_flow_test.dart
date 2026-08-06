@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:drift/drift.dart' hide isNull;
+import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:punit_tablet/core/database/local_database.dart';
 import 'package:punit_tablet/features/dispatch/data/dispatch_repository.dart';
 import 'package:punit_tablet/features/inventory/data/inventory_repository.dart';
@@ -54,6 +54,84 @@ void main() {
         ),
       ),
       isTrue,
+    );
+  });
+
+  test('infers stability numerically when scale sends no stability marker', () {
+    const profile = ScaleParsingProfile(
+      id: 'numeric-only',
+      name: 'Numeric only',
+      stableTokens: ['ST'],
+      unstableTokens: ['US'],
+    );
+    final parsed = const ScaleReadingParser(profile).parse('+0.845kg\n');
+
+    expect(parsed, isNotNull);
+    expect(parsed!.isStable, isFalse);
+    expect(parsed.stabilitySignalPresent, isFalse);
+
+    final detector = WeightStabilityDetector(
+      duration: const Duration(milliseconds: 500),
+      tolerance: 0.02,
+    );
+    final first = DateTime(2026);
+    expect(
+      detector.add(
+        ScaleReading(
+          grossWeight: 0.845,
+          unit: 'kg',
+          isStable: false,
+          stabilitySignalPresent: false,
+          raw: '+0.845kg',
+          recordedAt: first,
+        ),
+      ),
+      isFalse,
+    );
+    expect(
+      detector.add(
+        ScaleReading(
+          grossWeight: 0.846,
+          unit: 'kg',
+          isStable: false,
+          stabilitySignalPresent: false,
+          raw: '+0.846kg',
+          recordedAt: first.add(const Duration(milliseconds: 600)),
+        ),
+      ),
+      isTrue,
+    );
+  });
+
+  test('explicit unstable scale signal still blocks numerical fallback', () {
+    final detector = WeightStabilityDetector(
+      duration: const Duration(milliseconds: 500),
+      tolerance: 0.02,
+    );
+    final first = DateTime(2026);
+    expect(
+      detector.add(
+        ScaleReading(
+          grossWeight: 0.845,
+          unit: 'kg',
+          isStable: false,
+          raw: 'US,+0.845kg',
+          recordedAt: first,
+        ),
+      ),
+      isFalse,
+    );
+    expect(
+      detector.add(
+        ScaleReading(
+          grossWeight: 0.845,
+          unit: 'kg',
+          isStable: false,
+          raw: 'US,+0.845kg',
+          recordedAt: first.add(const Duration(seconds: 1)),
+        ),
+      ),
+      isFalse,
     );
   });
 
