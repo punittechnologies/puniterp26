@@ -57,6 +57,56 @@ void main() {
     );
   });
 
+  test('weight range blocks both automatic and manual capture paths', () {
+    final first = DateTime(2026);
+    const computation = WeightComputation(
+      gross: 8,
+      tare: 0,
+      net: 8,
+      unit: 'kg',
+      rangeStatus: WeightRangeStatus.underweight,
+    );
+    ScaleReading readingAt(int milliseconds) => ScaleReading(
+      grossWeight: 8,
+      unit: 'kg',
+      isStable: true,
+      raw: 'ST,+8kg',
+      recordedAt: first.add(Duration(milliseconds: milliseconds)),
+    );
+
+    final autoSession = WeighingSession(
+      stabilityDuration: const Duration(milliseconds: 500),
+    );
+    expect(autoSession.update(readingAt(0), computation), isFalse);
+    expect(autoSession.update(readingAt(600), computation), isFalse);
+    expect(autoSession.state, CaptureState.validated);
+    expect(WeighingController.isWithinAllowedRange(computation), isFalse);
+    expect(
+      WeighingController.isWithinAllowedRange(
+        const WeightComputation(
+          gross: 10,
+          tare: 0,
+          net: 10,
+          unit: 'kg',
+          rangeStatus: WeightRangeStatus.accepted,
+        ),
+      ),
+      isTrue,
+    );
+    expect(
+      WeighingController.isWithinAllowedRange(
+        const WeightComputation(
+          gross: 10,
+          tare: 0,
+          net: 10,
+          unit: 'kg',
+          rangeStatus: WeightRangeStatus.noRule,
+        ),
+      ),
+      isTrue,
+    );
+  });
+
   test('captures production locally and adds inventory', () async {
     final database = LocalDatabase.memory();
     final production = ProductionRepository(database: database);

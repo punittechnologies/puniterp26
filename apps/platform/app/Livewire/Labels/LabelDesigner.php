@@ -86,6 +86,7 @@ class LabelDesigner extends Component
 
             return;
         } else {
+            $this->code = $this->nextAvailableCode($this->code, Auth::user()?->tenant_id);
             $this->templateJson = $this->defaultJson();
         }
 
@@ -131,25 +132,44 @@ class LabelDesigner extends Component
 
             $service->update($template, $payload);
         } else {
-            $template = LabelTemplate::query()
+            $codeExists = LabelTemplate::query()
                 ->where('tenant_id', $tenantId)
                 ->where('code', $this->code)
-                ->where('is_archived', false)
-                ->first();
+                ->exists();
 
-            if ($template) {
-                $service->update($template, $payload);
-                $this->statusMessage = 'Existing template code found, so I updated that template instead of creating a duplicate.';
-            } else {
-                $template = $service->create($payload, $tenantId);
-                $this->statusMessage = 'Template saved.';
+            if ($codeExists) {
+                $this->statusMessage = 'This template code already exists. Nothing was overwritten. Please use the suggested code or enter a different code.';
+
+                return;
             }
 
+            $template = $service->create($payload, $tenantId);
+            $this->statusMessage = 'Template saved.';
             $this->templateId = $template->id;
         }
 
         $this->statusMessage ??= 'Template saved.';
         $this->dispatch('label-saved');
+    }
+
+    private function nextAvailableCode(string $baseCode, ?string $tenantId): string
+    {
+        if (! $tenantId) {
+            return $baseCode;
+        }
+
+        $candidate = $baseCode;
+        $suffix = 2;
+
+        while (LabelTemplate::query()
+            ->where('tenant_id', $tenantId)
+            ->where('code', $candidate)
+            ->exists()) {
+            $candidate = $baseCode.'-'.$suffix;
+            $suffix++;
+        }
+
+        return $candidate;
     }
 
     public function archive(LabelTemplateService $service): void

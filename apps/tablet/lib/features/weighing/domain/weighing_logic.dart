@@ -77,8 +77,7 @@ class WeighingSession {
     }
 
     state = CaptureState.stable;
-    if (computation.rangeStatus == WeightRangeStatus.underweight ||
-        computation.rangeStatus == WeightRangeStatus.overweight) {
+    if (!WeighingController.isWithinAllowedRange(computation)) {
       state = CaptureState.validated;
       return false;
     }
@@ -106,6 +105,11 @@ class WeighingController {
 
   final WeightRuleResolver ruleResolver;
   final UnitConversionCalculator conversionCalculator;
+
+  static bool isWithinAllowedRange(WeightComputation computation) {
+    return computation.rangeStatus != WeightRangeStatus.underweight &&
+        computation.rangeStatus != WeightRangeStatus.overweight;
+  }
 
   WeightComputation compute({
     required ScaleReading reading,

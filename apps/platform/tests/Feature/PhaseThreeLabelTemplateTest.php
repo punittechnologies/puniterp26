@@ -151,6 +151,85 @@ class PhaseThreeLabelTemplateTest extends TestCase
             ->assertSet('templateJson.elements.0.multiline', null);
     }
 
+    public function test_new_label_uses_a_unique_code_and_never_overwrites_an_existing_template(): void
+    {
+        $tenant = Tenant::query()->create([
+            'name' => 'Protected Labels Company',
+            'code' => 'PROTECTED-LABELS',
+            'status' => 'active',
+        ]);
+        $user = User::query()->create([
+            'tenant_id' => $tenant->id,
+            'name' => 'Label Admin',
+            'email' => 'protected-labels@example.test',
+            'password' => Hash::make('password'),
+            'is_active' => true,
+        ]);
+        $existing = app(LabelTemplateService::class)->create([
+            'name' => 'Existing Label',
+            'code' => 'NEW-LABEL',
+            'scope' => 'tenant',
+            'template_json' => $this->templateJson('Existing content'),
+        ], $tenant->id);
+
+        Livewire::actingAs($user)
+            ->test(LabelDesigner::class)
+            ->assertSet('code', 'NEW-LABEL-2')
+            ->set('name', 'Second Label')
+            ->call('save')
+            ->assertSet('statusMessage', 'Template saved.');
+
+        $this->assertDatabaseCount('label_templates', 2);
+        $this->assertSame(
+            'Existing content',
+            $existing->fresh()->template_json['elements'][0]['text'],
+        );
+        $this->assertDatabaseHas('label_templates', [
+            'tenant_id' => $tenant->id,
+            'name' => 'Second Label',
+            'code' => 'NEW-LABEL-2',
+        ]);
+    }
+
+    public function test_new_label_code_collision_is_rejected_without_modifying_the_existing_label(): void
+    {
+        $tenant = Tenant::query()->create([
+            'name' => 'Collision Company',
+            'code' => 'LABEL-COLLISION',
+            'status' => 'active',
+        ]);
+        $user = User::query()->create([
+            'tenant_id' => $tenant->id,
+            'name' => 'Label Admin',
+            'email' => 'label-collision@example.test',
+            'password' => Hash::make('password'),
+            'is_active' => true,
+        ]);
+        $existing = app(LabelTemplateService::class)->create([
+            'name' => 'Keep Me',
+            'code' => 'EXISTING-CODE',
+            'scope' => 'tenant',
+            'template_json' => $this->templateJson('Keep this content'),
+        ], $tenant->id);
+
+        Livewire::actingAs($user)
+            ->test(LabelDesigner::class)
+            ->set('name', 'Must Not Replace')
+            ->set('code', 'EXISTING-CODE')
+            ->call('save')
+            ->assertSet(
+                'statusMessage',
+                'This template code already exists. Nothing was overwritten. Please use the suggested code or enter a different code.',
+            );
+
+        $this->assertDatabaseCount('label_templates', 1);
+        $this->assertSame('Keep Me', $existing->fresh()->name);
+        $this->assertSame(
+            'Keep this content',
+            $existing->fresh()->template_json['elements'][0]['text'],
+        );
+    }
+
     private function tenantToken(): array
     {
         $tenant = Tenant::query()->create(['name' => 'Tenant', 'code' => 'TEN'.random_int(100, 999), 'status' => 'active']);

@@ -1077,6 +1077,13 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
       );
       return null;
     }
+    if (!WeighingController.isWithinAllowedRange(computed)) {
+      _showCornerMessage(
+        'Print stopped: the net weight is outside this product’s configured minimum and maximum range.',
+        error: true,
+      );
+      return null;
+    }
     var inwardSession = activeInwardSession;
     if (inwardSession?.status != 'open') {
       inwardSession = await productionRepository.startSession();
