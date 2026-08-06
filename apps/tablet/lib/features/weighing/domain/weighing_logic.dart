@@ -111,6 +111,15 @@ class WeighingController {
         computation.rangeStatus != WeightRangeStatus.overweight;
   }
 
+  static String rangeStatusLabel(WeightRangeStatus status) {
+    return switch (status) {
+      WeightRangeStatus.underweight => 'UNDERWEIGHT',
+      WeightRangeStatus.accepted => 'IN RANGE',
+      WeightRangeStatus.overweight => 'OVERWEIGHT',
+      WeightRangeStatus.noRule => 'NO RANGE SET',
+    };
+  }
+
   static bool shouldAutoSaveAndPrint({
     required bool autoCaptureEnabled,
     required bool readingReady,

@@ -147,10 +147,10 @@ class WeightStabilityDetector {
   ScaleReading? _last;
 
   bool add(ScaleReading reading) {
-    if (reading.stabilitySignalPresent && !reading.isStable) {
+    if (reading.stabilitySignalPresent) {
       _first = null;
       _last = reading;
-      return false;
+      return reading.isStable;
     }
 
     final first = _first;

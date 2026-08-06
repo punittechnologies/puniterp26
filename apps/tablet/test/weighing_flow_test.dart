@@ -25,7 +25,7 @@ void main() {
     expect(reading?.isStable, isTrue);
   });
 
-  test('detects stable readings after duration and tolerance', () {
+  test('accepts an explicit stable scale signal immediately', () {
     final detector = WeightStabilityDetector(
       duration: const Duration(milliseconds: 500),
       tolerance: 0.05,
@@ -39,18 +39,6 @@ void main() {
           isStable: true,
           raw: 'a',
           recordedAt: first,
-        ),
-      ),
-      isFalse,
-    );
-    expect(
-      detector.add(
-        ScaleReading(
-          grossWeight: 10.02,
-          unit: 'kg',
-          isStable: true,
-          raw: 'b',
-          recordedAt: first.add(const Duration(milliseconds: 600)),
         ),
       ),
       isTrue,
@@ -160,6 +148,10 @@ void main() {
     expect(autoSession.state, CaptureState.validated);
     expect(WeighingController.isWithinAllowedRange(computation), isFalse);
     expect(
+      WeighingController.rangeStatusLabel(computation.rangeStatus),
+      'UNDERWEIGHT',
+    );
+    expect(
       WeighingController.isWithinAllowedRange(
         const WeightComputation(
           gross: 10,
@@ -182,6 +174,14 @@ void main() {
         ),
       ),
       isTrue,
+    );
+    expect(
+      WeighingController.rangeStatusLabel(WeightRangeStatus.accepted),
+      'IN RANGE',
+    );
+    expect(
+      WeighingController.rangeStatusLabel(WeightRangeStatus.overweight),
+      'OVERWEIGHT',
     );
   });
 
