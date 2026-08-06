@@ -1039,7 +1039,11 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
       variant: null,
       manualTare: manualTare,
     );
-    final ready = session.update(value, computed);
+    final ready = session.update(
+      value,
+      computed,
+      enforceWeightRange: autoCapture,
+    );
     setState(() {
       reading = value;
       computation = computed;

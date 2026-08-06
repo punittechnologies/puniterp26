@@ -62,7 +62,11 @@ class WeighingSession {
   CaptureState state = CaptureState.idle;
   double? _lastCapturedWeight;
 
-  bool update(ScaleReading reading, WeightComputation computation) {
+  bool update(
+    ScaleReading reading,
+    WeightComputation computation, {
+    bool enforceWeightRange = true,
+  }) {
     if (computation.gross <= resetThreshold) {
       state = CaptureState.idle;
       _lastCapturedWeight = null;
@@ -77,8 +81,9 @@ class WeighingSession {
     }
 
     state = CaptureState.stable;
-    if (computation.rangeStatus == WeightRangeStatus.underweight ||
-        computation.rangeStatus == WeightRangeStatus.overweight) {
+    if (enforceWeightRange &&
+        (computation.rangeStatus == WeightRangeStatus.underweight ||
+            computation.rangeStatus == WeightRangeStatus.overweight)) {
       state = CaptureState.validated;
       return false;
     }
