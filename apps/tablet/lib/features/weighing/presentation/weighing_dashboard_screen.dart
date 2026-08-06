@@ -268,6 +268,82 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
     };
   }
 
+  Widget _autoCaptureControl() {
+    return SwitchListTile(
+      contentPadding: EdgeInsets.zero,
+      value: autoCapture,
+      onChanged: (value) => setState(() => autoCapture = value),
+      title: const Text(
+        'Auto capture',
+        style: TextStyle(fontWeight: FontWeight.w800),
+      ),
+      subtitle: Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Text(
+          _autoCaptureStatus,
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+      ),
+    );
+  }
+
+  Widget _weightRangeBadge(
+    WeightComputation? computed, {
+    bool compact = false,
+  }) {
+    final status = computed?.rangeStatus ?? WeightRangeStatus.noRule;
+    final (background, foreground, icon) = switch (status) {
+      WeightRangeStatus.underweight => (
+        const Color(0xFFFFF1F2),
+        const Color(0xFFBE123C),
+        Icons.arrow_downward_rounded,
+      ),
+      WeightRangeStatus.accepted => (
+        const Color(0xFFECFDF3),
+        const Color(0xFF067647),
+        Icons.check_circle_rounded,
+      ),
+      WeightRangeStatus.overweight => (
+        const Color(0xFFFFF1F2),
+        const Color(0xFFB42318),
+        Icons.arrow_upward_rounded,
+      ),
+      WeightRangeStatus.noRule => (
+        const Color(0xFFF1F5F9),
+        const Color(0xFF475569),
+        Icons.horizontal_rule_rounded,
+      ),
+    };
+
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 8 : 12,
+        vertical: compact ? 5 : 7,
+      ),
+      decoration: BoxDecoration(
+        color: background,
+        border: Border.all(color: foreground.withValues(alpha: 0.28)),
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: compact ? 14 : 16, color: foreground),
+          const SizedBox(width: 5),
+          Text(
+            WeighingController.rangeStatusLabel(status),
+            style: TextStyle(
+              color: foreground,
+              fontSize: compact ? 10 : 11,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.7,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1996,7 +2072,15 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
                   ],
                 ),
               ),
-              _ScaleLiveBadge(connected: _scaleConnected),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                alignment: WrapAlignment.end,
+                children: [
+                  _weightRangeBadge(computed),
+                  _ScaleLiveBadge(connected: _scaleConnected),
+                ],
+              ),
             ],
           ),
           const SizedBox(height: 28),
@@ -2078,13 +2162,18 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
             children: [
               _ScaleLiveBadge(connected: _scaleConnected, compact: true),
               const Spacer(),
-              const Text(
-                'NET WEIGHT',
-                style: TextStyle(
-                  color: Color(0xFF334155),
-                  fontSize: 11,
-                  letterSpacing: 1.1,
-                  fontWeight: FontWeight.w900,
+              _weightRangeBadge(computed, compact: true),
+              const SizedBox(width: 8),
+              const Flexible(
+                child: Text(
+                  'NET WEIGHT',
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Color(0xFF334155),
+                    fontSize: 11,
+                    letterSpacing: 1.1,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
               ),
             ],
@@ -2194,13 +2283,7 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
           const SizedBox(height: 18),
           _SessionStrip(session: activeInwardSession),
           const SizedBox(height: 12),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            value: autoCapture,
-            onChanged: (value) => setState(() => autoCapture = value),
-            title: const Text('Auto capture'),
-            subtitle: Text(_autoCaptureStatus),
-          ),
+          _autoCaptureControl(),
         ],
       ),
     );
@@ -2246,6 +2329,8 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
         ),
         const SizedBox(height: 12),
         _SessionStrip(session: activeInwardSession),
+        const SizedBox(height: 8),
+        _autoCaptureControl(),
       ],
     );
   }
