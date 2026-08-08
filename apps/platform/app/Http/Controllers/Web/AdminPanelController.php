@@ -1712,12 +1712,14 @@ class AdminPanelController extends Controller
         $payloads = ProductVariant::query()
             ->where('tenant_id', $tenantId)
             ->get(['metadata'])
+            ->toBase()
             ->map(fn (ProductVariant $variant) => $variant->metadata['dynamic_fields'] ?? [])
             ->merge(ProductionTransaction::query()
                 ->where('tenant_id', $tenantId)
                 ->latest('captured_at')
                 ->limit(2000)
                 ->get(['dynamic_values'])
+                ->toBase()
                 ->map(fn (ProductionTransaction $production) => $production->dynamic_values ?? []));
 
         return $fields->each(function (DynamicFieldDefinition $field) use ($payloads): void {
