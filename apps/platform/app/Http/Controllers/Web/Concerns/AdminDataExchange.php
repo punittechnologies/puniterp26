@@ -342,20 +342,13 @@ trait AdminDataExchange
             403,
         );
         $tenantId = $this->tenantId();
-        $data = $request->validate([
-            'stock_date' => ['required', 'date'],
-            'format' => ['required', Rule::in(['xlsx', 'pdf'])],
-            'product_id' => ['nullable', Rule::exists('products', 'id')->where('tenant_id', $tenantId)],
-            'variant_id' => ['nullable', Rule::exists('product_variants', 'id')->where('tenant_id', $tenantId)],
-            'detail_key' => ['nullable', Rule::exists('dynamic_field_definitions', 'internal_key')->where('tenant_id', $tenantId)],
-            'detail_value' => ['nullable', 'string', 'max:255'],
-            'transaction_type' => ['nullable', 'string', 'max:100'],
-            'search' => ['nullable', 'string', 'max:120'],
-            'weight_min' => ['nullable', 'numeric', 'min:0'],
-            'weight_max' => ['nullable', 'numeric', 'gte:weight_min'],
-            'pieces_min' => ['nullable', 'numeric', 'min:0'],
-            'pieces_max' => ['nullable', 'numeric', 'gte:pieces_min'],
-        ]);
+        $data = [
+            ...$this->operationalReportFilters($request, $tenantId),
+            ...$request->validate([
+                'stock_date' => ['required', 'date'],
+                'format' => ['required', Rule::in(['xlsx', 'pdf'])],
+            ]),
+        ];
         $asOf = CarbonImmutable::parse($data['stock_date'])->endOfDay();
         $query = InventoryTransaction::query()
             ->where('tenant_id', $tenantId)
