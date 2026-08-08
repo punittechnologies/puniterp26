@@ -360,7 +360,7 @@ class AdminDataRestorationTest extends TestCase
         $this->actingAs($admin)->get('/inventory/closing-stock/export?'.http_build_query([
             'stock_date' => now()->toDateString(),
             'format' => 'xlsx',
-            'product_id' => $matching->id,
+            'product_ids' => [$matching->id],
         ]))
             ->assertOk()
             ->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -372,6 +372,12 @@ class AdminDataRestorationTest extends TestCase
         ]))
             ->assertOk()
             ->assertHeader('content-type', 'application/pdf');
+
+        $this->actingAs($admin)->get('/inventory?'.http_build_query(['product_ids' => [$matching->id]]))
+            ->assertOk()
+            ->assertSee('name="product_ids[]"', false)
+            ->assertSee('Matching Product')
+            ->assertDontSee('OTHER-BC');
     }
 
     public function test_operational_report_filters_are_exact_and_downloads_match_the_filtered_rows(): void
@@ -390,12 +396,24 @@ class AdminDataRestorationTest extends TestCase
             ],
             'is_active' => true,
         ]);
+        $finishField = DynamicFieldDefinition::query()->create([
+            'tenant_id' => $tenant->id,
+            'field_label' => 'Finish',
+            'internal_key' => 'finish',
+            'entity_type' => 'product_variant',
+            'data_type' => 'dropdown',
+            'dropdown_options' => [
+                ['label' => 'Anodised', 'value' => 'anodised'],
+                ['label' => 'Mill', 'value' => 'mill'],
+            ],
+            'is_active' => true,
+        ]);
         $red = ProductVariant::query()->create([
             'tenant_id' => $tenant->id,
             'product_id' => $product->id,
             'name' => 'Red Variant',
             'variant_code' => 'RED',
-            'metadata' => ['dynamic_fields' => [$field->internal_key => 'red']],
+            'metadata' => ['dynamic_fields' => [$field->internal_key => 'red', $finishField->internal_key => 'anodised']],
             'is_active' => true,
         ]);
         $blue = ProductVariant::query()->create([
@@ -403,7 +421,7 @@ class AdminDataRestorationTest extends TestCase
             'product_id' => $product->id,
             'name' => 'Blue Variant',
             'variant_code' => 'BLUE',
-            'metadata' => ['dynamic_fields' => [$field->internal_key => 'blue']],
+            'metadata' => ['dynamic_fields' => [$field->internal_key => 'blue', $finishField->internal_key => 'mill']],
             'is_active' => true,
         ]);
         $session = InwardSession::query()->create([
@@ -442,7 +460,7 @@ class AdminDataRestorationTest extends TestCase
                 'serial_number' => 'SER-'.$color.'-'.$number,
                 'barcode_value' => 'BAR-'.$color.'-'.$number,
                 'product_snapshot' => ['name' => 'Precision Product'],
-                'dynamic_values' => ['color' => $color],
+                'dynamic_values' => ['color' => $color, 'finish' => $isRed ? 'anodised' : 'mill'],
                 'gross_weight' => $isRed ? 10 : 20,
                 'tare_weight' => 0,
                 'net_weight' => $isRed ? 10 : 20,
@@ -488,6 +506,78 @@ class AdminDataRestorationTest extends TestCase
         $completePdf = $this->actingAs($admin)->get('/dispatch/'.$dispatch->id.'/export/pdf');
         $completePdf->assertOk();
         $this->assertStringContainsString('/Count 3', $completePdf->getContent());
+
+        $multiQuery = http_build_query([
+            'product_ids' => [$product->id],
+            'detail_filters' => [
+                'color' => ['red', 'blue'],
+                'finish' => ['anodised'],
+            ],
+        ]);
+        $this->actingAs($admin)->get('/reports/dispatch?'.$multiQuery)
+            ->assertOk()
+            ->assertSee('name="product_ids[]"', false)
+            ->assertSee("'detail_filters['", false)
+            ->assertDontSee('Product variant');
+
+        $multiCsv = $this->actingAs($admin)->get('/dispatch/'.$dispatch->id.'/export/csv?'.$multiQuery);
+        $multiCsv->assertOk();
+        $multiContent = $multiCsv->streamedContent();
+        $this->assertStringContainsString('BAR-red-1', $multiContent);
+        $this->assertStringNotContainsString('BAR-blue-2', $multiContent);
+
+        $tenant->update(['settings' => [
+            'reportSummary' => [
+                'inward' => ['enabled' => true, 'groupBy' => ['product_name'], 'metrics' => ['net_kg']],
+                'dispatch' => ['enabled' => false, 'groupBy' => ['product_name'], 'metrics' => ['net_kg']],
+            ],
+        ]]);
+        $withoutSummary = $this->actingAs($admin)->get('/dispatch/'.$dispatch->id.'/export/pdf?'.$multiQuery);
+        $withoutSummary->assertOk();
+        $this->assertStringNotContainsString('PRODUCT SUMMARY', $withoutSummary->getContent());
+        $this->assertStringContainsString('/Count 1', $withoutSummary->getContent());
+    }
+
+    public function test_report_customiser_saves_independent_summary_choices(): void
+    {
+        [$tenant, $admin] = $this->adminUser();
+        DynamicFieldDefinition::query()->create([
+            'tenant_id' => $tenant->id,
+            'field_label' => 'Finish',
+            'internal_key' => 'finish',
+            'entity_type' => 'product_variant',
+            'data_type' => 'text',
+            'is_active' => true,
+        ]);
+
+        $this->actingAs($admin)->get('/tenant-settings')
+            ->assertOk()
+            ->assertSee('Inward Product Summary')
+            ->assertSee('Dispatch Product Summary');
+
+        $this->actingAs($admin)->post('/tenant-settings', [
+            'name' => $tenant->name,
+            'settings' => [
+                'reportSummary' => [
+                    'inward' => [
+                        'enabled' => '1',
+                        'groupBy' => ['product_name', 'finish'],
+                        'metrics' => ['sticker_pcs', 'net_kg'],
+                    ],
+                    'dispatch' => [
+                        'enabled' => '0',
+                        'groupBy' => ['product_name'],
+                        'metrics' => ['gross_kg'],
+                    ],
+                ],
+            ],
+        ])->assertRedirect()->assertSessionHasNoErrors();
+
+        $tenant->refresh();
+        $this->assertTrue((bool) data_get($tenant->settings, 'reportSummary.inward.enabled'));
+        $this->assertSame(['product_name', 'finish'], data_get($tenant->settings, 'reportSummary.inward.groupBy'));
+        $this->assertSame(['sticker_pcs', 'net_kg'], data_get($tenant->settings, 'reportSummary.inward.metrics'));
+        $this->assertFalse((bool) data_get($tenant->settings, 'reportSummary.dispatch.enabled'));
     }
 
     public function test_role_creation_is_tenant_scoped_and_rejects_duplicates(): void

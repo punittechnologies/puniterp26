@@ -936,6 +936,22 @@ body.admin-body {
 .report-filter-card {
     display: grid;
     gap: 14px;
+    overflow: visible;
+}
+
+[x-cloak] {
+    display: none !important;
+}
+
+.report-filter-head {
+    border-bottom: 1px solid #dbeafe;
+    padding-bottom: 12px;
+}
+
+.report-filter-toolbar {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
 }
 
 .report-quick-filters,
@@ -950,6 +966,188 @@ body.admin-body {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     width: 100%;
+}
+
+.report-filter-form {
+    align-items: stretch;
+    display: grid;
+    gap: 14px;
+}
+
+.report-filter-primary-grid {
+    align-items: end;
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
+    width: 100%;
+}
+
+.report-filter-primary-grid > label,
+.report-filter-label {
+    color: #334155;
+    display: grid;
+    font-size: 12px;
+    font-weight: 800;
+    gap: 6px;
+}
+
+.report-multiselect {
+    min-width: 0;
+    position: relative;
+}
+
+.report-select-trigger {
+    align-items: center;
+    background: #fff;
+    border: 1px solid var(--admin-border);
+    border-radius: 12px;
+    color: #172554;
+    cursor: pointer;
+    display: flex;
+    font: inherit;
+    font-weight: 700;
+    justify-content: space-between;
+    margin-top: 6px;
+    min-height: 44px;
+    padding: 10px 12px;
+    text-align: left;
+    width: 100%;
+}
+
+.report-select-trigger:focus,
+.report-select-trigger:hover {
+    border-color: #60a5fa;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, .12);
+    outline: 0;
+}
+
+.report-select-popover {
+    background: #fff;
+    border: 1px solid #bfdbfe;
+    border-radius: 14px;
+    box-shadow: 0 18px 50px rgba(30, 64, 175, .18);
+    display: grid;
+    gap: 9px;
+    left: 0;
+    min-width: min(320px, 88vw);
+    padding: 10px;
+    position: absolute;
+    top: calc(100% + 6px);
+    z-index: 30;
+}
+
+.report-select-popover > input {
+    width: 100%;
+}
+
+.report-select-options {
+    display: grid;
+    gap: 3px;
+    max-height: 230px;
+    overflow: auto;
+}
+
+.report-select-options label {
+    align-items: center;
+    border-radius: 9px;
+    color: #1e3a8a;
+    cursor: pointer;
+    display: flex;
+    font-size: 13px;
+    font-weight: 700;
+    gap: 9px;
+    padding: 8px;
+}
+
+.report-select-options label:hover {
+    background: #eff6ff;
+}
+
+.report-select-options input {
+    accent-color: #2563eb;
+}
+
+.report-popover-done {
+    background: #2563eb;
+    border: 0;
+    border-radius: 9px;
+    color: #fff;
+    cursor: pointer;
+    font-weight: 800;
+    padding: 9px;
+}
+
+.detail-condition-grid {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    width: 100%;
+}
+
+.detail-condition-card {
+    background: #f8fbff;
+    border: 1px solid #bfdbfe;
+    border-radius: 14px;
+    display: grid;
+    gap: 9px;
+    padding: 12px;
+}
+
+.detail-condition-card small {
+    color: #64748b;
+}
+
+.detail-condition-head {
+    align-items: center;
+    color: #1e3a8a;
+    display: flex;
+    justify-content: space-between;
+}
+
+.detail-condition-head button,
+.blue-value-chips button {
+    background: transparent;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 2px;
+}
+
+.blue-value-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+}
+
+.blue-value-chips > span {
+    align-items: center;
+    background: #2563eb;
+    border: 1px solid #1d4ed8;
+    border-radius: 999px;
+    color: #fff;
+    display: inline-flex;
+    font-size: 12px;
+    font-weight: 800;
+    gap: 6px;
+    padding: 6px 9px;
+}
+
+.blue-value-chips button {
+    color: #dbeafe;
+}
+
+.detail-value-entry {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: 1fr auto;
+}
+
+.report-filter-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 9px;
 }
 
 .report-advanced-filters {
@@ -973,12 +1171,48 @@ body.admin-body {
 }
 
 .active-filter-chips span {
-    background: #eaf2ff;
-    border: 1px solid #bdd4ff;
+    background: #2563eb;
+    border: 1px solid #1d4ed8;
     border-radius: 999px;
-    color: #173b73;
+    color: #fff;
     font-size: 12px;
     padding: 7px 11px;
+}
+
+.report-summary-settings {
+    border-color: #bfdbfe;
+}
+
+.report-customiser-grid {
+    display: grid;
+    gap: 18px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.report-customiser-grid > div {
+    background: #f8fbff;
+    border: 1px solid #dbeafe;
+    border-radius: 12px;
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+}
+
+.blue-toggle {
+    align-items: center;
+    background: #dbeafe;
+    border: 1px solid #93c5fd;
+    border-radius: 999px;
+    color: #1d4ed8;
+    display: inline-flex;
+    font-size: 13px;
+    font-weight: 800;
+    gap: 8px;
+    padding: 8px 11px;
+}
+
+.blue-toggle input {
+    accent-color: #2563eb;
 }
 
 .global-search {
@@ -2381,5 +2615,21 @@ nav[role="navigation"] {
     .performer-row {
         grid-template-columns: 1fr;
         gap: 7px;
+    }
+
+    .report-filter-primary-grid,
+    .detail-condition-grid,
+    .report-customiser-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .report-filter-head,
+    .report-filter-toolbar {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .report-select-popover {
+        min-width: 100%;
     }
 }

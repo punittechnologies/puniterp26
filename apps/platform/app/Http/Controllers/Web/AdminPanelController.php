@@ -28,6 +28,7 @@ use App\Models\ProductionTransaction;
 use App\Models\Role;
 use App\Models\ScaleProfile;
 use App\Models\SyncQueueEntry;
+use App\Models\Tenant;
 use App\Models\TenantOnboardingInvite;
 use App\Models\User;
 use Carbon\CarbonImmutable;
@@ -39,6 +40,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class AdminPanelController extends Controller
@@ -733,7 +735,7 @@ class AdminPanelController extends Controller
 
         $detailCards = $this->inventoryDetailCards(
             $tenantId,
-            $filters['product_id'] ?: null,
+            $filters['product_ids'],
             $filters['variant_id'] ?: null,
             $filters,
         );
@@ -748,12 +750,7 @@ class AdminPanelController extends Controller
             'productNames' => Product::query()->where('tenant_id', $tenantId)->pluck('name', 'id'),
             'variantNames' => ProductVariant::query()->where('tenant_id', $tenantId)->pluck('name', 'id'),
             'detailCards' => $detailCards,
-            'productFields' => DynamicFieldDefinition::query()
-                ->where('tenant_id', $tenantId)
-                ->where('entity_type', 'product_variant')
-                ->where('is_active', true)
-                ->orderBy('sort_order')
-                ->get(['internal_key', 'field_label']),
+            'productFields' => $this->reportProductFields($tenantId),
             'transactionTypes' => InventoryTransaction::query()
                 ->where('tenant_id', $tenantId)
                 ->whereNotNull('transaction_type')
@@ -1197,7 +1194,6 @@ class AdminPanelController extends Controller
             'columns' => $this->reportColumns($report),
             'showTabs' => $title === 'Reports',
             'products' => Product::query()->where('tenant_id', $tenantId)->orderBy('name')->get(['id', 'name']),
-            'variants' => ProductVariant::query()->where('tenant_id', $tenantId)->orderBy('name')->get(['id', 'product_id', 'name']),
             'customers' => Customer::query()->where('tenant_id', $tenantId)->where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'transactionTypes' => InventoryTransaction::query()
                 ->where('tenant_id', $tenantId)
@@ -1205,12 +1201,7 @@ class AdminPanelController extends Controller
                 ->distinct()
                 ->orderBy('transaction_type')
                 ->pluck('transaction_type'),
-            'productFields' => DynamicFieldDefinition::query()
-                ->where('tenant_id', $tenantId)
-                ->where('entity_type', 'product_variant')
-                ->where('is_active', true)
-                ->orderBy('sort_order')
-                ->get(['internal_key', 'field_label']),
+            'productFields' => $this->reportProductFields($tenantId),
         ]);
     }
 
@@ -1236,7 +1227,7 @@ class AdminPanelController extends Controller
         abort_if($productions->isEmpty(), 404);
 
         $rows = $this->inwardExportRows($productions, $tenantId);
-        $summaryRows = $this->operationalSummaryRows($rows);
+        $summaryRows = $this->operationalSummaryRows($rows, 'inward');
         $dynamicColumns = $this->dispatchDynamicColumns($rows, $tenantId);
         $selectedColumns = $this->selectedReportColumns('inward', $dynamicColumns, includeTime: true);
         $startedAt = $productions->first()?->captured_at;
@@ -1267,10 +1258,7 @@ class AdminPanelController extends Controller
                 ['Total Tare kg', (string) $rows->sum('tare_weight')],
                 ['Total Net kg', (string) $rows->sum('net_weight')],
                 ['Total Converted Unit', (string) $rows->sum('piece_quantity')],
-                [],
-                ['Product Summary'],
-                ['Product', 'Variant / Details', 'Sticker PCS', 'Gross kg', 'Tare kg', 'Net kg', 'Converted PCS'],
-                ...$summaryRows->map(fn ($row) => array_values($row))->all(),
+                ...$this->summarySpreadsheetRows('inward', $summaryRows),
             ]), 200, [
                 'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                 'Content-Disposition' => 'attachment; filename="'.$report.'.xlsx"',
@@ -1297,7 +1285,7 @@ class AdminPanelController extends Controller
         $dispatch->load('items');
         $rows = $this->dispatchExportRows($dispatch, $request);
         abort_if($rows->isEmpty(), 404, 'No dispatch rows match the selected filters.');
-        $summaryRows = $this->operationalSummaryRows($rows);
+        $summaryRows = $this->operationalSummaryRows($rows, 'dispatch');
         $dynamicColumns = $this->dispatchDynamicColumns($rows, $dispatch->tenant_id);
         $selectedColumns = $this->selectedReportColumns('dispatch', $dynamicColumns);
         $columns = array_keys($selectedColumns);
@@ -1326,10 +1314,7 @@ class AdminPanelController extends Controller
                 ['Total Tare kg', (string) $rows->sum('tare_weight')],
                 ['Total Net kg', (string) $rows->sum('net_weight')],
                 ['Total Converted Unit', (string) $rows->sum('piece_quantity')],
-                [],
-                ['Product Summary'],
-                ['Product', 'Variant / Details', 'Sticker PCS', 'Gross kg', 'Tare kg', 'Net kg', 'Converted PCS'],
-                ...$summaryRows->map(fn ($row) => array_values($row))->all(),
+                ...$this->summarySpreadsheetRows('dispatch', $summaryRows),
             ]), 200, [
                 'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                 'Content-Disposition' => 'attachment; filename="'.$report.'.xlsx"',
@@ -1458,8 +1443,42 @@ class AdminPanelController extends Controller
             'settings.reportColumns.inward.*' => ['string', 'max:100'],
             'settings.reportColumns.dispatch' => ['nullable', 'array'],
             'settings.reportColumns.dispatch.*' => ['string', 'max:100'],
+            'settings.reportSummary.inward.enabled' => ['nullable', 'boolean'],
+            'settings.reportSummary.inward.groupBy' => ['nullable', 'array', 'max:11'],
+            'settings.reportSummary.inward.groupBy.*' => ['string', 'max:100'],
+            'settings.reportSummary.inward.metrics' => ['nullable', 'array', 'max:5'],
+            'settings.reportSummary.inward.metrics.*' => [Rule::in(['sticker_pcs', 'gross_kg', 'tare_kg', 'net_kg', 'converted_pcs'])],
+            'settings.reportSummary.dispatch.enabled' => ['nullable', 'boolean'],
+            'settings.reportSummary.dispatch.groupBy' => ['nullable', 'array', 'max:11'],
+            'settings.reportSummary.dispatch.groupBy.*' => ['string', 'max:100'],
+            'settings.reportSummary.dispatch.metrics' => ['nullable', 'array', 'max:5'],
+            'settings.reportSummary.dispatch.metrics.*' => [Rule::in(['sticker_pcs', 'gross_kg', 'tare_kg', 'net_kg', 'converted_pcs'])],
         ]);
         $settings = $data['settings'] ?? [];
+        $validSummaryGroups = DynamicFieldDefinition::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('entity_type', 'product_variant')
+            ->where('is_active', true)
+            ->pluck('internal_key')
+            ->prepend('product_name');
+        foreach (['inward', 'dispatch'] as $report) {
+            $previous = data_get($tenant->settings ?? [], "reportSummary.$report");
+            if (! $request->has("settings.reportSummary.$report.enabled")) {
+                $settings['reportSummary'][$report] = is_array($previous) ? $previous : [
+                    'enabled' => true,
+                    'groupBy' => ['product_name', ...$validSummaryGroups->reject(fn ($key) => $key === 'product_name')->all()],
+                    'metrics' => ['sticker_pcs', 'gross_kg', 'tare_kg', 'net_kg', 'converted_pcs'],
+                ];
+
+                continue;
+            }
+            $settings['reportSummary'][$report]['enabled'] = (bool) data_get($settings, "reportSummary.$report.enabled", false);
+            $settings['reportSummary'][$report]['groupBy'] = collect(data_get($settings, "reportSummary.$report.groupBy", []))
+                ->intersect($validSummaryGroups)
+                ->values()
+                ->all();
+            $settings['reportSummary'][$report]['metrics'] = array_values(data_get($settings, "reportSummary.$report.metrics", []));
+        }
         if ($request->hasFile('logo')) {
             $settings['logoPath'] = $request->file('logo')->store('report-logos', 'public');
         } else {
@@ -1557,35 +1576,28 @@ class AdminPanelController extends Controller
             return;
         }
 
+        $filters = $this->requestFilterValues($request);
         $query
-            ->when($request->filled('product_id'), fn ($query) => $query->where($alias.'.product_id', $request->string('product_id')->toString()))
-            ->when($request->filled('variant_id'), fn ($query) => $query->where($alias.'.variant_id', $request->string('variant_id')->toString()))
-            ->when($request->filled('serial'), fn ($query) => $query->where($alias.'.serial_number', 'like', '%'.$request->string('serial')->toString().'%'))
-            ->when($request->filled('barcode'), fn ($query) => $query->where($alias.'.barcode_value', 'like', '%'.$request->string('barcode')->toString().'%'))
-            ->when($request->filled('weight_min'), fn ($query) => $query->where($alias.'.net_weight', '>=', $request->float('weight_min')))
-            ->when($request->filled('weight_max'), fn ($query) => $query->where($alias.'.net_weight', '<=', $request->float('weight_max')))
-            ->when($request->filled('pieces_min'), fn ($query) => $query->where($alias.'.piece_quantity', '>=', $request->float('pieces_min')))
-            ->when($request->filled('pieces_max'), fn ($query) => $query->where($alias.'.piece_quantity', '<=', $request->float('pieces_max')))
-            ->when($request->filled('detail_key') && $request->filled('detail_value'), function ($query) use ($request, $alias): void {
-                $key = $request->string('detail_key')->toString();
-                $value = $request->string('detail_value')->toString();
-                $variantIds = ProductVariant::query()
-                    ->where('tenant_id', $this->tenantId())
-                    ->where('metadata->dynamic_fields->'.$key, $value)
-                    ->pluck('id');
-                $query->where(fn ($query) => $query
-                    ->where($alias.'.dynamic_values->'.$key, $value)
-                    ->orWhereJsonContains($alias.'.dynamic_values->'.$key, $value)
-                    ->orWhereIn($alias.'.variant_id', $variantIds));
-            });
+            ->when($filters['product_ids'] !== [], fn ($query) => $query->whereIn($alias.'.product_id', $filters['product_ids']))
+            ->when($filters['variant_id'] !== '', fn ($query) => $query->where($alias.'.variant_id', $filters['variant_id']))
+            ->when($filters['serial'] !== '', fn ($query) => $query->where($alias.'.serial_number', 'like', '%'.$filters['serial'].'%'))
+            ->when($filters['barcode'] !== '', fn ($query) => $query->where($alias.'.barcode_value', 'like', '%'.$filters['barcode'].'%'))
+            ->when($filters['weight_min'] !== '', fn ($query) => $query->where($alias.'.net_weight', '>=', (float) $filters['weight_min']))
+            ->when($filters['weight_max'] !== '', fn ($query) => $query->where($alias.'.net_weight', '<=', (float) $filters['weight_max']))
+            ->when($filters['pieces_min'] !== '', fn ($query) => $query->where($alias.'.piece_quantity', '>=', (float) $filters['pieces_min']))
+            ->when($filters['pieces_max'] !== '', fn ($query) => $query->where($alias.'.piece_quantity', '<=', (float) $filters['pieces_max']));
+
+        foreach ($filters['detail_filters'] as $key => $values) {
+            $this->applyProductionDetailCondition($query, $this->tenantId(), $alias, $key, $values);
+        }
     }
 
     private function hasProductionReportFilters(?Request $request): bool
     {
-        return $request && collect([
-            'product_id', 'variant_id', 'serial', 'barcode', 'detail_key', 'detail_value',
+        return $request && ($this->requestProductIds($request) !== [] || $this->requestDetailFilters($request) !== [] || collect([
+            'variant_id', 'serial', 'barcode',
             'weight_min', 'weight_max', 'pieces_min', 'pieces_max',
-        ])->contains(fn ($key) => $request->filled($key));
+        ])->contains(fn ($key) => $request->filled($key)));
     }
 
     private function operationalReportFilters(Request $request, string $tenantId): array
@@ -1594,9 +1606,14 @@ class AdminPanelController extends Controller
             'from' => ['nullable', 'date'],
             'to' => ['nullable', 'date', 'after_or_equal:from'],
             'product_id' => ['nullable', Rule::exists('products', 'id')->where('tenant_id', $tenantId)],
+            'product_ids' => ['nullable', 'array', 'max:50'],
+            'product_ids.*' => [Rule::exists('products', 'id')->where('tenant_id', $tenantId)],
             'variant_id' => ['nullable', Rule::exists('product_variants', 'id')->where('tenant_id', $tenantId)],
             'detail_key' => ['nullable', Rule::exists('dynamic_field_definitions', 'internal_key')->where('tenant_id', $tenantId)],
             'detail_value' => ['nullable', 'string', 'max:255'],
+            'detail_filters' => ['nullable', 'array', 'max:10'],
+            'detail_filters.*' => ['nullable', 'array', 'max:20'],
+            'detail_filters.*.*' => ['nullable', 'string', 'max:255'],
             'serial' => ['nullable', 'string', 'max:120'],
             'barcode' => ['nullable', 'string', 'max:120'],
             'transaction_number' => ['nullable', 'string', 'max:120'],
@@ -1610,11 +1627,25 @@ class AdminPanelController extends Controller
             'pieces_max' => ['nullable', 'numeric', 'gte:pieces_min'],
         ]);
 
-        return collect([
-            'product_id', 'variant_id', 'detail_key', 'detail_value', 'serial', 'barcode',
-            'transaction_number', 'customer_id', 'status', 'transaction_type', 'search',
-            'weight_min', 'weight_max', 'pieces_min', 'pieces_max',
-        ])->mapWithKeys(fn ($key) => [$key => trim((string) ($validated[$key] ?? ''))])->all();
+        $detailFilters = $this->requestDetailFilters($request);
+        $validKeys = DynamicFieldDefinition::query()
+            ->where('tenant_id', $tenantId)
+            ->where('entity_type', 'product_variant')
+            ->where('is_active', true)
+            ->pluck('internal_key');
+        if (collect(array_keys($detailFilters))->diff($validKeys)->isNotEmpty()) {
+            throw ValidationException::withMessages(['detail_filters' => 'One or more selected product-detail fields are invalid.']);
+        }
+
+        return [
+            ...collect([
+                'product_id', 'variant_id', 'detail_key', 'detail_value', 'serial', 'barcode',
+                'transaction_number', 'customer_id', 'status', 'transaction_type', 'search',
+                'weight_min', 'weight_max', 'pieces_min', 'pieces_max',
+            ])->mapWithKeys(fn ($key) => [$key => trim((string) ($validated[$key] ?? ''))])->all(),
+            'product_ids' => $this->requestProductIds($request),
+            'detail_filters' => $detailFilters,
+        ];
     }
 
     private function requestFilterValues(?Request $request): array
@@ -1623,35 +1654,120 @@ class AdminPanelController extends Controller
             return [];
         }
 
-        return collect([
-            'product_id', 'variant_id', 'detail_key', 'detail_value', 'serial', 'barcode',
-            'transaction_number', 'customer_id', 'status', 'transaction_type', 'search',
-            'weight_min', 'weight_max', 'pieces_min', 'pieces_max',
-        ])->mapWithKeys(fn ($key) => [$key => trim($request->string($key)->toString())])->all();
+        return [
+            ...collect([
+                'product_id', 'variant_id', 'detail_key', 'detail_value', 'serial', 'barcode',
+                'transaction_number', 'customer_id', 'status', 'transaction_type', 'search',
+                'weight_min', 'weight_max', 'pieces_min', 'pieces_max',
+            ])->mapWithKeys(fn ($key) => [$key => trim($request->string($key)->toString())])->all(),
+            'product_ids' => $this->requestProductIds($request),
+            'detail_filters' => $this->requestDetailFilters($request),
+        ];
+    }
+
+    private function requestProductIds(Request $request): array
+    {
+        $ids = collect((array) $request->input('product_ids', []))
+            ->push($request->string('product_id')->toString())
+            ->map(fn ($value) => trim((string) $value))
+            ->filter()
+            ->unique()
+            ->take(50);
+
+        return $ids->values()->all();
+    }
+
+    private function requestDetailFilters(Request $request): array
+    {
+        $details = collect((array) $request->input('detail_filters', []))
+            ->mapWithKeys(fn ($values, $key) => [trim((string) $key) => collect((array) $values)
+                ->map(fn ($value) => trim((string) $value))
+                ->filter()
+                ->unique()
+                ->take(20)
+                ->values()
+                ->all()])
+            ->filter(fn ($values, $key) => $key !== '' && $values !== []);
+
+        if ($request->filled('detail_key') && $request->filled('detail_value')) {
+            $key = $request->string('detail_key')->toString();
+            $details[$key] = collect($details[$key] ?? [])
+                ->push($request->string('detail_value')->toString())
+                ->unique()
+                ->values()
+                ->all();
+        }
+
+        return $details->take(10)->all();
+    }
+
+    private function reportProductFields(string $tenantId)
+    {
+        $fields = DynamicFieldDefinition::query()
+            ->where('tenant_id', $tenantId)
+            ->where('entity_type', 'product_variant')
+            ->where('is_active', true)
+            ->orderBy('sort_order')
+            ->get(['internal_key', 'field_label', 'data_type', 'dropdown_options']);
+        $payloads = ProductVariant::query()
+            ->where('tenant_id', $tenantId)
+            ->get(['metadata'])
+            ->map(fn (ProductVariant $variant) => $variant->metadata['dynamic_fields'] ?? [])
+            ->merge(ProductionTransaction::query()
+                ->where('tenant_id', $tenantId)
+                ->latest('captured_at')
+                ->limit(2000)
+                ->get(['dynamic_values'])
+                ->map(fn (ProductionTransaction $production) => $production->dynamic_values ?? []));
+
+        return $fields->each(function (DynamicFieldDefinition $field) use ($payloads): void {
+            $configured = collect($field->dropdown_options ?? [])->flatten();
+            $observed = $payloads
+                ->pluck($field->internal_key)
+                ->flatMap(fn ($value) => is_array($value) ? $value : [$value]);
+            $field->setAttribute('filter_options', $configured
+                ->merge($observed)
+                ->map(fn ($value) => trim((string) $value))
+                ->filter()
+                ->unique()
+                ->sort(SORT_NATURAL)
+                ->take(200)
+                ->values()
+                ->all());
+        });
+    }
+
+    private function applyProductionDetailCondition($query, string $tenantId, string $alias, string $key, array $values): void
+    {
+        $variantIds = ProductVariant::query()
+            ->where('tenant_id', $tenantId)
+            ->where(function ($query) use ($key, $values): void {
+                foreach ($values as $value) {
+                    $query->orWhere('metadata->dynamic_fields->'.$key, $value)
+                        ->orWhereJsonContains('metadata->dynamic_fields->'.$key, $value);
+                }
+            })
+            ->pluck('id');
+
+        $query->where(function ($query) use ($alias, $key, $values, $variantIds): void {
+            foreach ($values as $value) {
+                $query->orWhere($alias.'.dynamic_values->'.$key, $value)
+                    ->orWhereJsonContains($alias.'.dynamic_values->'.$key, $value);
+            }
+            $query->orWhereIn($alias.'.variant_id', $variantIds);
+        });
     }
 
     private function applyInventoryFilters($query, array $filters, string $tenantId): void
     {
         $query
-            ->when($filters['product_id'] ?? null, fn ($query, $id) => $query->where('product_id', $id))
+            ->when($filters['product_ids'] ?? [], fn ($query, $ids) => $query->whereIn('product_id', $ids))
             ->when($filters['variant_id'] ?? null, fn ($query, $id) => $query->where('variant_id', $id))
             ->when($filters['transaction_type'] ?? null, fn ($query, $type) => $query->where('transaction_type', $type))
             ->when($filters['weight_min'] ?? null, fn ($query, $value) => $query->where('weight_quantity', '>=', (float) $value))
             ->when($filters['weight_max'] ?? null, fn ($query, $value) => $query->where('weight_quantity', '<=', (float) $value))
             ->when($filters['pieces_min'] ?? null, fn ($query, $value) => $query->where('piece_quantity', '>=', (float) $value))
             ->when($filters['pieces_max'] ?? null, fn ($query, $value) => $query->where('piece_quantity', '<=', (float) $value))
-            ->when(($filters['detail_key'] ?? '') !== '' && ($filters['detail_value'] ?? '') !== '', function ($query) use ($filters, $tenantId): void {
-                $key = $filters['detail_key'];
-                $value = $filters['detail_value'];
-                $variantIds = ProductVariant::query()
-                    ->where('tenant_id', $tenantId)
-                    ->where('metadata->dynamic_fields->'.$key, $value)
-                    ->pluck('id');
-                $query->where(fn ($query) => $query
-                    ->where('dynamic_values->'.$key, $value)
-                    ->orWhereJsonContains('dynamic_values->'.$key, $value)
-                    ->orWhereIn('variant_id', $variantIds));
-            })
             ->when($filters['search'] ?? null, function ($query, string $value) use ($tenantId): void {
                 $search = '%'.$value.'%';
                 $query->where(fn ($query) => $query
@@ -1664,23 +1780,13 @@ class AdminPanelController extends Controller
                         ->where(fn ($production) => $production
                             ->where('serial_number', 'like', $search)
                             ->orWhere('barcode_value', 'like', $search))));
-            })
-            ->when(($filters['detail_key'] ?? '') !== '' && ($filters['detail_value'] ?? '') !== '', function ($query) use ($filters, $tenantId): void {
-                $key = $filters['detail_key'];
-                $value = $filters['detail_value'];
-                $variantIds = ProductVariant::query()
-                    ->where('tenant_id', $tenantId)
-                    ->where('metadata->dynamic_fields->'.$key, $value)
-                    ->pluck('id');
-                $barcodes = ProductionTransaction::query()
-                    ->select('barcode_value')
-                    ->where('tenant_id', $tenantId)
-                    ->where(fn ($production) => $production
-                        ->where('dynamic_values->'.$key, $value)
-                        ->orWhereJsonContains('dynamic_values->'.$key, $value)
-                        ->orWhereIn('variant_id', $variantIds));
-                $query->whereIn('barcode_value', $barcodes);
             });
+
+        foreach ($filters['detail_filters'] ?? [] as $key => $values) {
+            $barcodes = ProductionTransaction::query()->select('barcode_value')->where('tenant_id', $tenantId);
+            $this->applyProductionDetailCondition($barcodes, $tenantId, 'production_transactions', $key, $values);
+            $query->whereIn('barcode_value', $barcodes);
+        }
     }
 
     public function reportColumns(string $report): array
@@ -1726,7 +1832,7 @@ class AdminPanelController extends Controller
 
     private function inventoryDetailCards(
         string $tenantId,
-        ?string $productId = null,
+        array $productIds = [],
         ?string $variantId = null,
         array $filters = [],
     ) {
@@ -1734,7 +1840,7 @@ class AdminPanelController extends Controller
         $productions = ProductionTransaction::query()
             ->where('tenant_id', $tenantId)
             ->where('status', 'active')
-            ->when($productId, fn ($query, $id) => $query->where('product_id', $id))
+            ->when($productIds, fn ($query, $ids) => $query->whereIn('product_id', $ids))
             ->when($variantId, fn ($query, $id) => $query->where('variant_id', $id))
             ->when($filters['from'] ?? null, fn ($query, $from) => $query->where('captured_at', '>=', CarbonImmutable::parse($from)->startOfDay()))
             ->when($filters['to'] ?? null, fn ($query, $to) => $query->where('captured_at', '<=', CarbonImmutable::parse($to)->endOfDay()))
@@ -1749,8 +1855,11 @@ class AdminPanelController extends Controller
                     ->orWhere('barcode_value', 'like', $search)
                     ->orWhereIn('product_id', Product::query()->select('id')->where('tenant_id', $tenantId)->where('name', 'like', $search))
                     ->orWhereIn('variant_id', ProductVariant::query()->select('id')->where('tenant_id', $tenantId)->where('name', 'like', $search)));
-            })
-            ->latest('captured_at')
+            });
+        foreach ($filters['detail_filters'] ?? [] as $key => $values) {
+            $this->applyProductionDetailCondition($productions, $tenantId, 'production_transactions', $key, $values);
+        }
+        $productions = $productions->latest('captured_at')
             ->limit(1000)
             ->get(['product_id', 'variant_id', 'dynamic_values', 'net_weight', 'piece_quantity']);
 
@@ -1883,6 +1992,7 @@ class AdminPanelController extends Controller
             ],
             $rows,
             $columns,
+            'dispatch',
         );
     }
 
@@ -1909,14 +2019,15 @@ class AdminPanelController extends Controller
             ],
             $rows,
             $columns,
+            'inward',
         );
     }
 
-    private function operationalReportPdf(string $tenantId, string $title, array $metadataLines, $rows, array $columns): string
+    private function operationalReportPdf(string $tenantId, string $title, array $metadataLines, $rows, array $columns, string $report): string
     {
         $logo = $this->reportLogo($tenantId);
         $detailChunks = $rows->chunk(18)->values();
-        $summaryRows = $this->operationalSummaryRows($rows);
+        $summaryRows = $this->operationalSummaryRows($rows, $report);
         $summaryChunks = $summaryRows->chunk(16)->values();
         $pageKinds = [
             ...$detailChunks->map(fn ($chunk) => ['type' => 'detail', 'rows' => $chunk])->all(),
@@ -1972,15 +2083,7 @@ class AdminPanelController extends Controller
                 }
                 $detailOffset += $page['rows']->count();
             } else {
-                $summaryColumns = [
-                    ['key' => 'product', 'label' => 'Product', 'x' => 24, 'width' => 110],
-                    ['key' => 'variant_details', 'label' => 'Variant / Details', 'x' => 134, 'width' => 170],
-                    ['key' => 'sticker_pcs', 'label' => 'Sticker PCS', 'x' => 304, 'width' => 52],
-                    ['key' => 'gross_kg', 'label' => 'Gross kg', 'x' => 356, 'width' => 52],
-                    ['key' => 'tare_kg', 'label' => 'Tare kg', 'x' => 408, 'width' => 46],
-                    ['key' => 'net_kg', 'label' => 'Net kg', 'x' => 454, 'width' => 50],
-                    ['key' => 'converted_pcs', 'label' => 'Conv. PCS', 'x' => 504, 'width' => 68],
-                ];
+                $summaryColumns = $this->summaryPdfColumns($report);
                 $tableTop = 700;
                 $rowHeight = 28;
                 foreach ($summaryColumns as $column) {
@@ -2098,7 +2201,8 @@ class AdminPanelController extends Controller
         }
 
         $contains = fn ($actual, string $needle): bool => str_contains(mb_strtolower((string) $actual), mb_strtolower($needle));
-        if ($request->filled('product_id') && (string) $row['product_id'] !== $request->string('product_id')->toString()) {
+        $productIds = $this->requestProductIds($request);
+        if ($productIds !== [] && ! in_array((string) $row['product_id'], $productIds, true)) {
             return false;
         }
         if ($request->filled('variant_id') && (string) $row['variant_id'] !== $request->string('variant_id')->toString()) {
@@ -2110,8 +2214,11 @@ class AdminPanelController extends Controller
         if ($request->filled('barcode') && ! $contains($row['barcode_value'], $request->string('barcode')->toString())) {
             return false;
         }
-        if ($request->filled('detail_key') && $request->filled('detail_value')) {
-            if ((string) data_get($row, 'product_fields.'.$request->string('detail_key')->toString(), '') !== $request->string('detail_value')->toString()) {
+        foreach ($this->requestDetailFilters($request) as $key => $values) {
+            $actualValues = collect((array) data_get($row, 'product_fields.'.$key, []))
+                ->flatMap(fn ($value) => is_array($value) ? $value : explode(',', (string) $value))
+                ->map(fn ($value) => trim((string) $value));
+            if ($actualValues->intersect($values)->isEmpty()) {
                 return false;
             }
         }
@@ -2129,24 +2236,41 @@ class AdminPanelController extends Controller
         return true;
     }
 
-    private function operationalSummaryRows($rows)
+    private function operationalSummaryRows($rows, string $report)
     {
+        $configuration = $this->reportSummaryConfiguration($report);
+        if (! $configuration['enabled']) {
+            return collect();
+        }
+        $groupBy = $configuration['groupBy'];
+        $allDetails = in_array('__all_details', $groupBy, true);
+
         return $rows
-            ->groupBy(fn ($row) => implode('|', [
-                $row['product_id'] ?? $row['product_name'],
-                $row['variant_id'] ?? '',
-                json_encode($row['product_fields'] ?? []),
-            ]))
-            ->map(function ($group): array {
+            ->groupBy(function ($row) use ($allDetails, $groupBy): string {
+                $parts = [];
+                if (in_array('product_name', $groupBy, true)) {
+                    $parts[] = $row['product_id'] ?? $row['product_name'];
+                }
+                $detailKeys = $allDetails ? array_keys($row['product_fields'] ?? []) : array_values(array_diff($groupBy, ['product_name']));
+                foreach ($detailKeys as $key) {
+                    $parts[] = $key.'='.json_encode(data_get($row, 'product_fields.'.$key));
+                }
+
+                return implode('|', $parts) ?: 'all';
+            })
+            ->map(function ($group) use ($allDetails, $groupBy): array {
                 $first = $group->first();
-                $details = collect($first['product_fields'] ?? [])
+                $detailKeys = $allDetails ? array_keys($first['product_fields'] ?? []) : array_values(array_diff($groupBy, ['product_name']));
+                $labels = $this->configuredDynamicColumnLabels($detailKeys);
+                $details = collect($detailKeys)
+                    ->mapWithKeys(fn ($key) => [$key => data_get($first, 'product_fields.'.$key)])
                     ->filter(fn ($value) => filled($value))
-                    ->map(fn ($value, $key) => str($key)->replace('_', ' ')->title().': '.$value)
+                    ->map(fn ($value, $key) => ($labels[$key] ?? str($key)->replace('_', ' ')->title()).': '.$value)
                     ->implode(', ');
 
                 return [
-                    'product' => $first['product_name'],
-                    'variant_details' => collect([$first['variant_name'] ?? null, $details])->filter(fn ($value) => filled($value) && $value !== '-')->implode(' | ') ?: '-',
+                    'product' => in_array('product_name', $groupBy, true) ? $first['product_name'] : 'All selected products',
+                    'variant_details' => $details ?: '-',
                     'sticker_pcs' => $group->count(),
                     'gross_kg' => round($group->sum('gross_weight'), 3),
                     'tare_kg' => round($group->sum('tare_weight'), 3),
@@ -2156,6 +2280,74 @@ class AdminPanelController extends Controller
             })
             ->sortBy('product')
             ->values();
+    }
+
+    private function reportSummaryConfiguration(string $report): array
+    {
+        $settings = Tenant::query()->find(Auth::user()?->tenant_id)?->settings ?? [];
+        $configured = data_get($settings, "reportSummary.$report");
+
+        return [
+            'enabled' => is_array($configured) ? (bool) ($configured['enabled'] ?? false) : true,
+            'groupBy' => is_array($configured) ? array_values($configured['groupBy'] ?? []) : ['product_name', '__all_details'],
+            'metrics' => is_array($configured)
+                ? array_values($configured['metrics'] ?? [])
+                : ['sticker_pcs', 'gross_kg', 'tare_kg', 'net_kg', 'converted_pcs'],
+        ];
+    }
+
+    private function summaryColumnLabels(string $report): array
+    {
+        $labels = [
+            'product' => 'Product',
+            'variant_details' => 'Product Details',
+            'sticker_pcs' => 'Sticker PCS',
+            'gross_kg' => 'Gross kg',
+            'tare_kg' => 'Tare kg',
+            'net_kg' => 'Net kg',
+            'converted_pcs' => 'Converted PCS',
+        ];
+        $metrics = $this->reportSummaryConfiguration($report)['metrics'];
+
+        return collect($labels)
+            ->filter(fn ($label, $key) => in_array($key, ['product', 'variant_details'], true) || in_array($key, $metrics, true))
+            ->all();
+    }
+
+    private function summarySpreadsheetRows(string $report, $rows): array
+    {
+        if ($rows->isEmpty()) {
+            return [];
+        }
+        $columns = $this->summaryColumnLabels($report);
+
+        return [
+            [],
+            ['Product Summary'],
+            array_values($columns),
+            ...$rows->map(fn ($row) => collect(array_keys($columns))->map(fn ($key) => $row[$key])->all())->all(),
+        ];
+    }
+
+    private function summaryPdfColumns(string $report): array
+    {
+        $labels = $this->summaryColumnLabels($report);
+        $fixedWidth = 280;
+        $metricCount = max(1, count($labels) - 2);
+        $metricWidth = (548 - $fixedWidth) / $metricCount;
+        $x = 24;
+
+        return collect($labels)->map(function ($label, $key) use (&$x, $metricWidth): array {
+            $width = match ($key) {
+                'product' => 110,
+                'variant_details' => 170,
+                default => $metricWidth,
+            };
+            $column = ['key' => $key, 'label' => $label, 'x' => $x, 'width' => $width];
+            $x += $width;
+
+            return $column;
+        })->values()->all();
     }
 
     private function dispatchDynamicColumns($rows, string $tenantId)

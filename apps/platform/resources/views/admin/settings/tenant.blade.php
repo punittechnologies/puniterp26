@@ -8,6 +8,7 @@
     @php($dynamicColumns = $productFields->pluck('field_label', 'internal_key')->all())
     @php($inwardSelected = old('settings.reportColumns.inward', data_get($settings, 'reportColumns.inward', array_keys(array_merge($inwardColumns, $dynamicColumns)))))
     @php($dispatchSelected = old('settings.reportColumns.dispatch', data_get($settings, 'reportColumns.dispatch', array_keys(array_merge($dispatchColumns, $dynamicColumns)))))
+    @php($summaryMetrics = ['sticker_pcs' => 'Sticker PCS', 'gross_kg' => 'Gross kg', 'tare_kg' => 'Tare kg', 'net_kg' => 'Net kg', 'converted_pcs' => 'Converted PCS'])
     <form class="card form-grid" method="POST" action="{{ route('admin.tenant-settings.save') }}" enctype="multipart/form-data">
         @csrf
         <div class="card-head full">
@@ -83,5 +84,43 @@
                 @endforeach
             </div>
         </div>
+
+        @foreach(['inward' => 'Inward', 'dispatch' => 'Dispatch'] as $reportKey => $reportLabel)
+            @php($summaryEnabled = (bool) old("settings.reportSummary.$reportKey.enabled", data_get($settings, "reportSummary.$reportKey.enabled", true)))
+            @php($summaryGroups = old("settings.reportSummary.$reportKey.groupBy", data_get($settings, "reportSummary.$reportKey.groupBy", ['product_name', ...array_keys($dynamicColumns)])))
+            @php($selectedMetrics = old("settings.reportSummary.$reportKey.metrics", data_get($settings, "reportSummary.$reportKey.metrics", array_keys($summaryMetrics))))
+            <div class="full card subtle report-summary-settings">
+                <div class="card-head">
+                    <div>
+                        <h3>{{ $reportLabel }} Product Summary</h3>
+                        <p class="muted">Choose whether the summary is included and how filtered rows are grouped and totalled.</p>
+                    </div>
+                    <label class="blue-toggle">
+                        <input type="hidden" name="settings[reportSummary][{{ $reportKey }}][enabled]" value="0">
+                        <input type="checkbox" name="settings[reportSummary][{{ $reportKey }}][enabled]" value="1" @checked($summaryEnabled)>
+                        Include summary
+                    </label>
+                </div>
+                <div class="report-customiser-grid">
+                    <div>
+                        <strong>Group rows by</strong>
+                        <div class="checkbox-grid compact">
+                            <label><input type="checkbox" name="settings[reportSummary][{{ $reportKey }}][groupBy][]" value="product_name" @checked(in_array('product_name', $summaryGroups ?? [], true))> Product</label>
+                            @foreach($dynamicColumns as $key => $label)
+                                <label><input type="checkbox" name="settings[reportSummary][{{ $reportKey }}][groupBy][]" value="{{ $key }}" @checked(in_array($key, $summaryGroups ?? [], true))> {{ $label }}</label>
+                            @endforeach
+                        </div>
+                    </div>
+                    <div>
+                        <strong>Summary totals</strong>
+                        <div class="checkbox-grid compact">
+                            @foreach($summaryMetrics as $key => $label)
+                                <label><input type="checkbox" name="settings[reportSummary][{{ $reportKey }}][metrics][]" value="{{ $key }}" @checked(in_array($key, $selectedMetrics ?? [], true))> {{ $label }}</label>
+                            @endforeach
+                        </div>
+                    </div>
+                </div>
+            </div>
+        @endforeach
     </form>
 @endsection

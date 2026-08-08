@@ -7,71 +7,12 @@
         <x-admin.metric label="Product rows" :value="$summary->total()" />
     </section>
 
-    <section class="card">
-        <div class="card-head">
-            <div>
-                <h2>Inventory Filters</h2>
-                <p>Filter current stock and ledger movements without changing any inventory data.</p>
-            </div>
-            <a class="btn" href="{{ route('admin.inventory') }}">Clear Filters</a>
-        </div>
-        <div class="report-quick-filters">
-            <a class="btn" href="{{ route('admin.inventory', [...request()->except(['from', 'to', 'page', 'ledger_page']), 'from' => now()->toDateString(), 'to' => now()->toDateString()]) }}">Today</a>
-            <a class="btn" href="{{ route('admin.inventory', [...request()->except(['from', 'to', 'page', 'ledger_page']), 'from' => now()->startOfWeek()->toDateString(), 'to' => now()->toDateString()]) }}">This week</a>
-            <a class="btn" href="{{ route('admin.inventory', [...request()->except(['from', 'to', 'page', 'ledger_page']), 'from' => now()->startOfMonth()->toDateString(), 'to' => now()->toDateString()]) }}">This month</a>
-        </div>
-        <form method="GET" action="{{ route('admin.inventory') }}" class="filter-bar report-filter-grid">
-            <label>Product
-                <select name="product_id">
-                    <option value="">All products</option>
-                    @foreach($products as $product)
-                        <option value="{{ $product->id }}" @selected($filters['product_id'] === $product->id)>{{ $product->name }}</option>
-                    @endforeach
-                </select>
-            </label>
-            <label>Product detail
-                <select name="variant_id">
-                    <option value="">All product details</option>
-                    @foreach($variants as $variant)
-                        <option value="{{ $variant->id }}" @selected($filters['variant_id'] === $variant->id)>{{ $variant->name }}</option>
-                    @endforeach
-                </select>
-            </label>
-            <label>Movement type
-                <select name="transaction_type">
-                    <option value="">All movement types</option>
-                    @foreach($transactionTypes as $type)
-                        <option value="{{ $type }}" @selected($filters['transaction_type'] === $type)>{{ str($type)->replace('_', ' ')->title() }}</option>
-                    @endforeach
-                </select>
-            </label>
-            <label>Serial or barcode
-                <input name="search" value="{{ $filters['search'] }}" placeholder="Product, detail, serial or barcode">
-            </label>
-            <label>From date
-                <input type="date" name="from" value="{{ $filters['from'] }}">
-            </label>
-            <label>To date
-                <input type="date" name="to" value="{{ $filters['to'] }}">
-            </label>
-            <label>Product-detail field
-                <select name="detail_key"><option value="">Any field</option>@foreach($productFields as $field)<option value="{{ $field->internal_key }}" @selected($filters['detail_key'] === $field->internal_key)>{{ $field->field_label }}</option>@endforeach</select>
-            </label>
-            <label>Exact detail value<input name="detail_value" value="{{ $filters['detail_value'] }}" placeholder="Exact value"></label>
-            <details class="report-advanced-filters">
-                <summary>Advanced weight and PCS filters</summary>
-                <div class="report-filter-grid">
-                    <label>Minimum weight kg<input type="number" min="0" step="0.001" name="weight_min" value="{{ $filters['weight_min'] }}"></label>
-                    <label>Maximum weight kg<input type="number" min="0" step="0.001" name="weight_max" value="{{ $filters['weight_max'] }}"></label>
-                    <label>Minimum PCS<input type="number" min="0" step="1" name="pieces_min" value="{{ $filters['pieces_min'] }}"></label>
-                    <label>Maximum PCS<input type="number" min="0" step="1" name="pieces_max" value="{{ $filters['pieces_max'] }}"></label>
-                </div>
-            </details>
-            <button class="btn primary">Apply Filters</button>
-        </form>
-        @php($activeInventoryFilters = collect($filters)->filter(fn ($value) => filled($value)))
-        @if($activeInventoryFilters->isNotEmpty())<div class="active-filter-chips">@foreach($activeInventoryFilters as $key => $value)<span><strong>{{ str($key)->replace('_', ' ')->title() }}:</strong> {{ $value }}</span>@endforeach</div>@endif
-    </section>
+    @include('admin.partials.operational-report-filters', [
+        'filterContext' => 'inventory',
+        'filterTitle' => 'Inventory Filters',
+        'filterAction' => route('admin.inventory'),
+        'clearUrl' => route('admin.inventory'),
+    ])
 
     <section class="card">
         <div class="card-head">
@@ -84,8 +25,16 @@
             <label>Closing date
                 <input type="date" name="stock_date" value="{{ now()->toDateString() }}" required>
             </label>
-            @foreach(collect($filters)->except(['from', 'to'])->filter(fn ($value) => filled($value)) as $filterKey => $filterValue)
+            @foreach(collect($filters)->except(['from', 'to', 'product_ids', 'detail_filters'])->filter(fn ($value) => filled($value)) as $filterKey => $filterValue)
                 <input type="hidden" name="{{ $filterKey }}" value="{{ $filterValue }}">
+            @endforeach
+            @foreach($filters['product_ids'] ?? [] as $productId)
+                <input type="hidden" name="product_ids[]" value="{{ $productId }}">
+            @endforeach
+            @foreach($filters['detail_filters'] ?? [] as $detailKey => $detailValues)
+                @foreach($detailValues as $detailValue)
+                    <input type="hidden" name="detail_filters[{{ $detailKey }}][]" value="{{ $detailValue }}">
+                @endforeach
             @endforeach
             <button class="btn primary" name="format" value="xlsx">Download Excel</button>
             <button class="btn" name="format" value="pdf">Download PDF</button>

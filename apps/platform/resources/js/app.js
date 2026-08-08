@@ -859,3 +859,68 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
         },
     };
 };
+
+window.reportFilterBuilder = function reportFilterBuilder(products = [], fields = [], selectedProductIds = [], selectedDetails = {}) {
+    return {
+        products: Array.isArray(products) ? products : [],
+        fields: Array.isArray(fields) ? fields : [],
+        selectedProductIds: (Array.isArray(selectedProductIds) ? selectedProductIds : []).map(String),
+        selectedDetails: Object.fromEntries(Object.entries(selectedDetails || {}).map(([key, values]) => [key, (Array.isArray(values) ? values : [values]).map(String)])),
+        detailInputs: {},
+        productOpen: false,
+        detailOpen: false,
+        productSearch: '',
+        detailSearch: '',
+        filteredProducts() {
+            const term = this.productSearch.trim().toLowerCase();
+            return this.products.filter((product) => !term || String(product.name).toLowerCase().includes(term));
+        },
+        filteredFields() {
+            const term = this.detailSearch.trim().toLowerCase();
+            return this.fields.filter((field) => !term || String(field.field_label).toLowerCase().includes(term));
+        },
+        productLabel() {
+            if (!this.selectedProductIds.length) return 'All products';
+            const first = this.products.find((product) => String(product.id) === this.selectedProductIds[0]);
+            return `${first?.name || 'Selected product'}${this.selectedProductIds.length > 1 ? ` +${this.selectedProductIds.length - 1}` : ''}`;
+        },
+        detailLabel() {
+            const count = Object.keys(this.selectedDetails).length;
+            return count ? `${count} selected` : 'Choose details';
+        },
+        toggleDetail(key) {
+            if (Object.prototype.hasOwnProperty.call(this.selectedDetails, key)) {
+                delete this.selectedDetails[key];
+            } else {
+                this.selectedDetails[key] = [];
+            }
+            this.selectedDetails = { ...this.selectedDetails };
+        },
+        detailSelected(key) {
+            return Object.prototype.hasOwnProperty.call(this.selectedDetails, key);
+        },
+        activeDetailFields() {
+            return this.fields.filter((field) => this.detailSelected(field.internal_key));
+        },
+        valuesFor(key) {
+            return this.selectedDetails[key] || [];
+        },
+        addDetailValue(key) {
+            const value = String(this.detailInputs[key] || '').trim();
+            if (!value) return;
+            const values = this.valuesFor(key);
+            if (!values.includes(value) && values.length < 20) {
+                this.selectedDetails[key] = [...values, value];
+                this.selectedDetails = { ...this.selectedDetails };
+            }
+            this.detailInputs[key] = '';
+        },
+        removeDetailValue(key, value) {
+            this.selectedDetails[key] = this.valuesFor(key).filter((item) => item !== value);
+            this.selectedDetails = { ...this.selectedDetails };
+        },
+        fieldOptions(field) {
+            return Array.isArray(field.filter_options) ? field.filter_options : [];
+        },
+    };
+};
