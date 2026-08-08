@@ -15,7 +15,12 @@
             </div>
             <a class="btn" href="{{ route('admin.inventory') }}">Clear Filters</a>
         </div>
-        <form method="GET" action="{{ route('admin.inventory') }}" class="filter-bar">
+        <div class="report-quick-filters">
+            <a class="btn" href="{{ route('admin.inventory', [...request()->except(['from', 'to', 'page', 'ledger_page']), 'from' => now()->toDateString(), 'to' => now()->toDateString()]) }}">Today</a>
+            <a class="btn" href="{{ route('admin.inventory', [...request()->except(['from', 'to', 'page', 'ledger_page']), 'from' => now()->startOfWeek()->toDateString(), 'to' => now()->toDateString()]) }}">This week</a>
+            <a class="btn" href="{{ route('admin.inventory', [...request()->except(['from', 'to', 'page', 'ledger_page']), 'from' => now()->startOfMonth()->toDateString(), 'to' => now()->toDateString()]) }}">This month</a>
+        </div>
+        <form method="GET" action="{{ route('admin.inventory') }}" class="filter-bar report-filter-grid">
             <label>Product
                 <select name="product_id">
                     <option value="">All products</option>
@@ -41,7 +46,7 @@
                 </select>
             </label>
             <label>Serial or barcode
-                <input name="search" value="{{ $filters['search'] }}" placeholder="Search serial or barcode">
+                <input name="search" value="{{ $filters['search'] }}" placeholder="Product, detail, serial or barcode">
             </label>
             <label>From date
                 <input type="date" name="from" value="{{ $filters['from'] }}">
@@ -49,8 +54,23 @@
             <label>To date
                 <input type="date" name="to" value="{{ $filters['to'] }}">
             </label>
+            <label>Product-detail field
+                <select name="detail_key"><option value="">Any field</option>@foreach($productFields as $field)<option value="{{ $field->internal_key }}" @selected($filters['detail_key'] === $field->internal_key)>{{ $field->field_label }}</option>@endforeach</select>
+            </label>
+            <label>Exact detail value<input name="detail_value" value="{{ $filters['detail_value'] }}" placeholder="Exact value"></label>
+            <details class="report-advanced-filters">
+                <summary>Advanced weight and PCS filters</summary>
+                <div class="report-filter-grid">
+                    <label>Minimum weight kg<input type="number" min="0" step="0.001" name="weight_min" value="{{ $filters['weight_min'] }}"></label>
+                    <label>Maximum weight kg<input type="number" min="0" step="0.001" name="weight_max" value="{{ $filters['weight_max'] }}"></label>
+                    <label>Minimum PCS<input type="number" min="0" step="1" name="pieces_min" value="{{ $filters['pieces_min'] }}"></label>
+                    <label>Maximum PCS<input type="number" min="0" step="1" name="pieces_max" value="{{ $filters['pieces_max'] }}"></label>
+                </div>
+            </details>
             <button class="btn primary">Apply Filters</button>
         </form>
+        @php($activeInventoryFilters = collect($filters)->filter(fn ($value) => filled($value)))
+        @if($activeInventoryFilters->isNotEmpty())<div class="active-filter-chips">@foreach($activeInventoryFilters as $key => $value)<span><strong>{{ str($key)->replace('_', ' ')->title() }}:</strong> {{ $value }}</span>@endforeach</div>@endif
     </section>
 
     <section class="card">
@@ -64,12 +84,9 @@
             <label>Closing date
                 <input type="date" name="stock_date" value="{{ now()->toDateString() }}" required>
             </label>
-            @if($filters['product_id'])
-                <input type="hidden" name="product_id" value="{{ $filters['product_id'] }}">
-            @endif
-            @if($filters['variant_id'])
-                <input type="hidden" name="variant_id" value="{{ $filters['variant_id'] }}">
-            @endif
+            @foreach(collect($filters)->except(['from', 'to'])->filter(fn ($value) => filled($value)) as $filterKey => $filterValue)
+                <input type="hidden" name="{{ $filterKey }}" value="{{ $filterValue }}">
+            @endforeach
             <button class="btn primary" name="format" value="xlsx">Download Excel</button>
             <button class="btn" name="format" value="pdf">Download PDF</button>
         </form>
@@ -165,7 +182,7 @@
     </section>
 
     <div class="card">
-        <div class="card-head"><h2>Filtered Inventory Ledger</h2><a class="btn" href="{{ route('admin.exports', array_merge(['report' => 'inventory-ledger', 'format' => 'csv'], request()->query())) }}">Export CSV</a></div>
+        <div class="card-head"><h2>Filtered Inventory Ledger</h2><div class="dispatch-actions"><a class="btn" href="{{ route('admin.exports', array_merge(['report' => 'inventory-ledger', 'format' => 'csv'], request()->query())) }}">CSV</a><a class="btn" href="{{ route('admin.exports', array_merge(['report' => 'inventory-ledger', 'format' => 'xlsx'], request()->query())) }}">Excel</a><a class="btn primary" href="{{ route('admin.exports', array_merge(['report' => 'inventory-ledger', 'format' => 'pdf'], request()->query())) }}">PDF</a></div></div>
         <div class="table-wrap"><table class="data-table"><thead><tr><th>Type</th><th>Product</th><th>Barcode</th><th>Weight</th><th>PCS</th><th>Reference</th><th>Date</th></tr></thead><tbody>
             @forelse($ledger as $row)
                 <tr><td>{{ $row->transaction_type }}</td><td>{{ $productNames[$row->product_id] ?? $row->product_id }}</td><td>{{ $row->barcode_value ?? '-' }}</td><td>{{ $row->weight_quantity }}</td><td>{{ $row->piece_quantity ?? '-' }}</td><td>{{ $row->reference_type }}</td><td>{{ $row->occurred_at?->format('d M Y H:i') }}</td></tr>

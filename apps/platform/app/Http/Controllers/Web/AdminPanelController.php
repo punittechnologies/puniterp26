@@ -703,64 +703,44 @@ class AdminPanelController extends Controller
     public function inventory(Request $request): View
     {
         $tenantId = $this->tenantId();
-        $filters = $request->validate([
-            'product_id' => ['nullable', Rule::exists('products', 'id')->where('tenant_id', $tenantId)],
-            'variant_id' => ['nullable', Rule::exists('product_variants', 'id')->where('tenant_id', $tenantId)],
-            'transaction_type' => ['nullable', 'string', 'max:100'],
-            'search' => ['nullable', 'string', 'max:120'],
-            'from' => ['nullable', 'date'],
-            'to' => ['nullable', 'date', 'after_or_equal:from'],
-        ]);
+        $validatedFilters = $this->operationalReportFilters($request, $tenantId);
         $filters = [
-            'product_id' => $filters['product_id'] ?? '',
-            'variant_id' => $filters['variant_id'] ?? '',
-            'transaction_type' => $filters['transaction_type'] ?? '',
-            'search' => trim($filters['search'] ?? ''),
-            'from' => $filters['from'] ?? '',
-            'to' => $filters['to'] ?? '',
+            ...$validatedFilters,
+            'from' => $request->string('from')->toString(),
+            'to' => $request->string('to')->toString(),
         ];
 
-        $summary = InventoryTransaction::query()
-            ->where('tenant_id', $tenantId)
-            ->when($filters['product_id'], fn ($query, $id) => $query->where('product_id', $id))
-            ->when($filters['variant_id'], fn ($query, $id) => $query->where('variant_id', $id))
+        $filteredInventory = InventoryTransaction::query()->where('tenant_id', $tenantId);
+        $this->applyInventoryFilters($filteredInventory, $filters, $tenantId);
+        $filteredInventory
+            ->when($filters['from'], fn ($query, $from) => $query->where('occurred_at', '>=', CarbonImmutable::parse($from)->startOfDay()))
+            ->when($filters['to'], fn ($query, $to) => $query->where('occurred_at', '<=', CarbonImmutable::parse($to)->endOfDay()));
+
+        $summary = (clone $filteredInventory)
             ->select('product_id', 'variant_id', DB::raw($this->inventoryWeightExpression().' as weight'), DB::raw($this->inventoryPieceExpression().' as pieces'), DB::raw('max(occurred_at) as last_movement'))
             ->groupBy('product_id', 'variant_id')
             ->orderByDesc('weight')
             ->paginate(25)
             ->withQueryString();
-        $ledger = InventoryTransaction::query()
-            ->where('tenant_id', $tenantId)
-            ->when($filters['product_id'], fn ($query, $id) => $query->where('product_id', $id))
-            ->when($filters['variant_id'], fn ($query, $id) => $query->where('variant_id', $id))
-            ->when($filters['transaction_type'], fn ($query, $type) => $query->where('transaction_type', $type))
-            ->when($filters['from'], fn ($query, $from) => $query->where('occurred_at', '>=', CarbonImmutable::parse($from)->startOfDay()))
-            ->when($filters['to'], fn ($query, $to) => $query->where('occurred_at', '<=', CarbonImmutable::parse($to)->endOfDay()))
-            ->when($filters['search'], function ($query, string $search) use ($tenantId): void {
-                $like = '%'.$search.'%';
-                $matchingBarcodes = ProductionTransaction::query()
-                    ->select('barcode_value')
-                    ->where('tenant_id', $tenantId)
-                    ->where(fn ($query) => $query
-                        ->where('serial_number', 'like', $like)
-                        ->orWhere('barcode_value', 'like', $like));
-                $query->where(fn ($query) => $query
-                    ->where('barcode_value', 'like', $like)
-                    ->orWhereIn('barcode_value', $matchingBarcodes));
-            })
+        $ledger = (clone $filteredInventory)
             ->latest('occurred_at')
             ->paginate(25, ['*'], 'ledger_page')
             ->withQueryString();
+
+        $filteredTotals = (clone $filteredInventory)
+            ->select(DB::raw($this->inventoryWeightExpression().' as weight'), DB::raw($this->inventoryPieceExpression().' as pieces'))
+            ->first();
 
         $detailCards = $this->inventoryDetailCards(
             $tenantId,
             $filters['product_id'] ?: null,
             $filters['variant_id'] ?: null,
+            $filters,
         );
 
         return view('admin.inventory.index', [
             'title' => 'Inventory',
-            'totals' => $this->inventoryTotals($tenantId),
+            'totals' => ['weight' => (float) ($filteredTotals->weight ?? 0), 'pieces' => (float) ($filteredTotals->pieces ?? 0)],
             'summary' => $summary,
             'ledger' => $ledger,
             'products' => Product::query()->where('tenant_id', $tenantId)->orderBy('name')->get(),
@@ -768,6 +748,12 @@ class AdminPanelController extends Controller
             'productNames' => Product::query()->where('tenant_id', $tenantId)->pluck('name', 'id'),
             'variantNames' => ProductVariant::query()->where('tenant_id', $tenantId)->pluck('name', 'id'),
             'detailCards' => $detailCards,
+            'productFields' => DynamicFieldDefinition::query()
+                ->where('tenant_id', $tenantId)
+                ->where('entity_type', 'product_variant')
+                ->where('is_active', true)
+                ->orderBy('sort_order')
+                ->get(['internal_key', 'field_label']),
             'transactionTypes' => InventoryTransaction::query()
                 ->where('tenant_id', $tenantId)
                 ->whereNotNull('transaction_type')
@@ -1187,12 +1173,13 @@ class AdminPanelController extends Controller
 
     public function dispatchReport(Request $request): View
     {
-        return $this->reportView('dispatch', $request, 'Dispatch Report / Packing List');
+        return $this->reportView('dispatch', $request, 'Dispatch Report');
     }
 
     private function reportView(string $report, Request $request, string $title): View
     {
         $tenantId = $this->tenantId();
+        $filters = $this->operationalReportFilters($request, $tenantId);
         [$from, $to] = $this->dateRange($request, defaultDays: 30);
         $rows = $report === 'inward'
             ? $this->inwardSessionRows($tenantId, $from, $to, $request)
@@ -1204,15 +1191,20 @@ class AdminPanelController extends Controller
             'filters' => [
                 'from' => $from->toDateString(),
                 'to' => $to->toDateString(),
-                'product_id' => $request->string('product_id')->toString(),
-                'barcode' => $request->string('barcode')->toString(),
-                'detail_key' => $request->string('detail_key')->toString(),
-                'detail_value' => $request->string('detail_value')->toString(),
+                ...$filters,
             ],
             'rows' => ($report === 'dispatch' ? $rows->withCount('items') : $rows)->paginate(25)->withQueryString(),
             'columns' => $this->reportColumns($report),
             'showTabs' => $title === 'Reports',
             'products' => Product::query()->where('tenant_id', $tenantId)->orderBy('name')->get(['id', 'name']),
+            'variants' => ProductVariant::query()->where('tenant_id', $tenantId)->orderBy('name')->get(['id', 'product_id', 'name']),
+            'customers' => Customer::query()->where('tenant_id', $tenantId)->where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'transactionTypes' => InventoryTransaction::query()
+                ->where('tenant_id', $tenantId)
+                ->whereNotNull('transaction_type')
+                ->distinct()
+                ->orderBy('transaction_type')
+                ->pluck('transaction_type'),
             'productFields' => DynamicFieldDefinition::query()
                 ->where('tenant_id', $tenantId)
                 ->where('entity_type', 'product_variant')
@@ -1222,24 +1214,29 @@ class AdminPanelController extends Controller
         ]);
     }
 
-    public function inwardExport(string $session, string $format)
+    public function inwardExport(Request $request, string $session, string $format)
     {
         $tenantId = $this->tenantId();
+        $this->operationalReportFilters($request, $tenantId);
         $inwardSession = InwardSession::query()
             ->where('tenant_id', $tenantId)
             ->where(fn ($query) => $query->where('id', $session)->orWhere('session_number', $session))
             ->first();
         $date = $inwardSession ? null : CarbonImmutable::parse($session);
-        $productions = ProductionTransaction::query()
+        $productionQuery = ProductionTransaction::query()
             ->where('tenant_id', $tenantId)
             ->when($inwardSession, fn ($query) => $query->where('inward_session_id', $inwardSession->id))
             ->when(! $inwardSession, fn ($query) => $query->whereBetween('captured_at', [$date->startOfDay(), $date->endOfDay()]))
-            ->orderBy('captured_at')
-            ->get();
+            ->when($request->filled('from'), fn ($query) => $query->where('captured_at', '>=', CarbonImmutable::parse($request->string('from')->toString())->startOfDay()))
+            ->when($request->filled('to'), fn ($query) => $query->where('captured_at', '<=', CarbonImmutable::parse($request->string('to')->toString())->endOfDay()))
+            ->orderBy('captured_at');
+        $this->applyProductionReportFilters($productionQuery, $request);
+        $productions = $productionQuery->get();
 
         abort_if($productions->isEmpty(), 404);
 
         $rows = $this->inwardExportRows($productions, $tenantId);
+        $summaryRows = $this->operationalSummaryRows($rows);
         $dynamicColumns = $this->dispatchDynamicColumns($rows, $tenantId);
         $selectedColumns = $this->selectedReportColumns('inward', $dynamicColumns, includeTime: true);
         $startedAt = $productions->first()?->captured_at;
@@ -1248,7 +1245,7 @@ class AdminPanelController extends Controller
         $report = 'inward-'.($inwardSession?->session_number ?? $date->format('Ymd'));
 
         if ($format === 'pdf') {
-            return response($this->inwardPdf($session, $productions, $tenantId, $inwardSession), 200, [
+            return response($this->inwardPdf($session, $productions, $tenantId, $inwardSession, $rows), 200, [
                 'Content-Type' => 'application/pdf',
                 'Content-Disposition' => 'attachment; filename="'.$report.'.pdf"',
             ]);
@@ -1270,6 +1267,10 @@ class AdminPanelController extends Controller
                 ['Total Tare kg', (string) $rows->sum('tare_weight')],
                 ['Total Net kg', (string) $rows->sum('net_weight')],
                 ['Total Converted Unit', (string) $rows->sum('piece_quantity')],
+                [],
+                ['Product Summary'],
+                ['Product', 'Variant / Details', 'Sticker PCS', 'Gross kg', 'Tare kg', 'Net kg', 'Converted PCS'],
+                ...$summaryRows->map(fn ($row) => array_values($row))->all(),
             ]), 200, [
                 'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                 'Content-Disposition' => 'attachment; filename="'.$report.'.xlsx"',
@@ -1289,18 +1290,21 @@ class AdminPanelController extends Controller
         ]);
     }
 
-    public function dispatchExport(Dispatch $dispatch, string $format)
+    public function dispatchExport(Request $request, Dispatch $dispatch, string $format)
     {
         $this->ensureTenant($dispatch->tenant_id);
+        $this->operationalReportFilters($request, $dispatch->tenant_id);
         $dispatch->load('items');
-        $rows = $this->dispatchExportRows($dispatch);
+        $rows = $this->dispatchExportRows($dispatch, $request);
+        abort_if($rows->isEmpty(), 404, 'No dispatch rows match the selected filters.');
+        $summaryRows = $this->operationalSummaryRows($rows);
         $dynamicColumns = $this->dispatchDynamicColumns($rows, $dispatch->tenant_id);
         $selectedColumns = $this->selectedReportColumns('dispatch', $dynamicColumns);
         $columns = array_keys($selectedColumns);
         $report = 'dispatch-'.$dispatch->dispatch_number;
 
         if ($format === 'pdf') {
-            return response($this->dispatchPdf($dispatch), 200, [
+            return response($this->dispatchPdf($dispatch, $rows), 200, [
                 'Content-Type' => 'application/pdf',
                 'Content-Disposition' => 'attachment; filename="'.$report.'.pdf"',
             ]);
@@ -1322,6 +1326,10 @@ class AdminPanelController extends Controller
                 ['Total Tare kg', (string) $rows->sum('tare_weight')],
                 ['Total Net kg', (string) $rows->sum('net_weight')],
                 ['Total Converted Unit', (string) $rows->sum('piece_quantity')],
+                [],
+                ['Product Summary'],
+                ['Product', 'Variant / Details', 'Sticker PCS', 'Gross kg', 'Tare kg', 'Net kg', 'Converted PCS'],
+                ...$summaryRows->map(fn ($row) => array_values($row))->all(),
             ]), 200, [
                 'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                 'Content-Disposition' => 'attachment; filename="'.$report.'.xlsx"',
@@ -1346,15 +1354,8 @@ class AdminPanelController extends Controller
         abort_unless(Auth::user()?->hasPermission('reports.view'), 403);
         abort_unless(in_array($report, ['inward', 'dispatch', 'inventory', 'inventory-ledger', 'audit'], true), 404);
         abort_unless(in_array($format, ['pdf', 'xlsx', 'csv'], true), 404);
-        $request->validate([
-            'from' => ['nullable', 'date'],
-            'to' => ['nullable', 'date', 'after_or_equal:from'],
-            'product_id' => ['nullable', 'string'],
-            'variant_id' => ['nullable', 'string'],
-            'transaction_type' => ['nullable', 'string', 'max:100'],
-            'search' => ['nullable', 'string', 'max:120'],
-        ]);
         $tenantId = $this->tenantId();
+        $this->operationalReportFilters($request, $tenantId);
         [$from, $to] = $this->dateRange($request, defaultDays: 30);
         $rows = $this->reportRows($report, $tenantId, $from, $to, $request)->limit(5000)->get();
         $columns = $this->reportColumns($report);
@@ -1498,6 +1499,7 @@ class AdminPanelController extends Controller
             ->whereBetween('pt.captured_at', [$from, $to]);
 
         $this->applyProductionReportFilters($query, $request, 'pt');
+        $query->when($request?->filled('transaction_number'), fn ($query) => $query->where('ins.session_number', 'like', '%'.$request->string('transaction_number')->toString().'%'));
 
         return $query
             ->selectRaw('coalesce(pt.inward_session_id, date(pt.captured_at)) as session_key')
@@ -1516,24 +1518,12 @@ class AdminPanelController extends Controller
     private function reportRows(string $report, string $tenantId, CarbonImmutable $from, CarbonImmutable $to, ?Request $request = null)
     {
         return match ($report) {
-            'inventory', 'inventory-ledger' => InventoryTransaction::query()
-                ->where('tenant_id', $tenantId)
-                ->whereBetween('occurred_at', [$from, $to])
-                ->when($request?->filled('product_id'), fn ($query) => $query->where('product_id', $request->string('product_id')->toString()))
-                ->when($request?->filled('variant_id'), fn ($query) => $query->where('variant_id', $request->string('variant_id')->toString()))
-                ->when($request?->filled('transaction_type'), fn ($query) => $query->where('transaction_type', $request->string('transaction_type')->toString()))
-                ->when($request?->filled('search'), function ($query) use ($request, $tenantId): void {
-                    $search = '%'.$request->string('search')->toString().'%';
-                    $query->where(fn ($query) => $query
-                        ->where('barcode_value', 'like', $search)
-                        ->orWhereIn('barcode_value', ProductionTransaction::query()
-                            ->select('barcode_value')
-                            ->where('tenant_id', $tenantId)
-                            ->where(fn ($production) => $production
-                                ->where('serial_number', 'like', $search)
-                                ->orWhere('barcode_value', 'like', $search))));
-                })
-                ->latest('occurred_at'),
+            'inventory', 'inventory-ledger' => tap(
+                InventoryTransaction::query()
+                    ->where('tenant_id', $tenantId)
+                    ->whereBetween('occurred_at', [$from, $to]),
+                fn ($query) => $this->applyInventoryFilters($query, $this->requestFilterValues($request), $tenantId),
+            )->latest('occurred_at'),
             'dispatch', 'customer-dispatch' => Dispatch::query()
                 ->where('tenant_id', $tenantId)
                 ->where(function ($query) use ($from, $to): void {
@@ -1544,18 +1534,13 @@ class AdminPanelController extends Controller
                         });
                 })
                 ->when($request?->filled('barcode'), fn ($query) => $query->whereHas('items', fn ($itemQuery) => $itemQuery->where('barcode_value', 'like', '%'.$request->string('barcode')->toString().'%')))
-                ->when($request?->filled('product_id'), fn ($query) => $query->whereHas('items', function ($itemQuery) use ($request): void {
-                    $itemQuery->whereIn('production_transaction_id', ProductionTransaction::query()
-                        ->select('id')
-                        ->where('tenant_id', $this->tenantId())
-                        ->where('product_id', $request->string('product_id')->toString()));
-                }))
-                ->when($request?->filled('detail_key') && $request?->filled('detail_value'), fn ($query) => $query->whereHas('items', function ($itemQuery) use ($request): void {
-                    $itemQuery->whereIn('production_transaction_id', ProductionTransaction::query()
-                        ->select('id')
-                        ->where('tenant_id', $this->tenantId())
-                        ->where('dynamic_values', 'like', '%"'.$request->string('detail_key')->toString().'"%')
-                        ->where('dynamic_values', 'like', '%'.$request->string('detail_value')->toString().'%'));
+                ->when($request?->filled('transaction_number'), fn ($query) => $query->where('dispatch_number', 'like', '%'.$request->string('transaction_number')->toString().'%'))
+                ->when($request?->filled('customer_id'), fn ($query) => $query->where('customer_id', $request->string('customer_id')->toString()))
+                ->when($request?->filled('status'), fn ($query) => $query->where('status', $request->string('status')->toString()))
+                ->when($this->hasProductionReportFilters($request), fn ($query) => $query->whereHas('items', function ($itemQuery) use ($request, $tenantId): void {
+                    $productions = ProductionTransaction::query()->select('id')->where('tenant_id', $tenantId);
+                    $this->applyProductionReportFilters($productions, $request);
+                    $itemQuery->whereIn('production_transaction_id', $productions);
                 }))
                 ->latest(),
             'audit' => AuditLog::query()->where('tenant_id', $tenantId)->whereBetween('created_at', [$from, $to])->latest(),
@@ -1574,10 +1559,127 @@ class AdminPanelController extends Controller
 
         $query
             ->when($request->filled('product_id'), fn ($query) => $query->where($alias.'.product_id', $request->string('product_id')->toString()))
+            ->when($request->filled('variant_id'), fn ($query) => $query->where($alias.'.variant_id', $request->string('variant_id')->toString()))
+            ->when($request->filled('serial'), fn ($query) => $query->where($alias.'.serial_number', 'like', '%'.$request->string('serial')->toString().'%'))
             ->when($request->filled('barcode'), fn ($query) => $query->where($alias.'.barcode_value', 'like', '%'.$request->string('barcode')->toString().'%'))
+            ->when($request->filled('weight_min'), fn ($query) => $query->where($alias.'.net_weight', '>=', $request->float('weight_min')))
+            ->when($request->filled('weight_max'), fn ($query) => $query->where($alias.'.net_weight', '<=', $request->float('weight_max')))
+            ->when($request->filled('pieces_min'), fn ($query) => $query->where($alias.'.piece_quantity', '>=', $request->float('pieces_min')))
+            ->when($request->filled('pieces_max'), fn ($query) => $query->where($alias.'.piece_quantity', '<=', $request->float('pieces_max')))
             ->when($request->filled('detail_key') && $request->filled('detail_value'), function ($query) use ($request, $alias): void {
-                $query->where($alias.'.dynamic_values', 'like', '%"'.$request->string('detail_key')->toString().'"%')
-                    ->where($alias.'.dynamic_values', 'like', '%'.$request->string('detail_value')->toString().'%');
+                $key = $request->string('detail_key')->toString();
+                $value = $request->string('detail_value')->toString();
+                $variantIds = ProductVariant::query()
+                    ->where('tenant_id', $this->tenantId())
+                    ->where('metadata->dynamic_fields->'.$key, $value)
+                    ->pluck('id');
+                $query->where(fn ($query) => $query
+                    ->where($alias.'.dynamic_values->'.$key, $value)
+                    ->orWhereJsonContains($alias.'.dynamic_values->'.$key, $value)
+                    ->orWhereIn($alias.'.variant_id', $variantIds));
+            });
+    }
+
+    private function hasProductionReportFilters(?Request $request): bool
+    {
+        return $request && collect([
+            'product_id', 'variant_id', 'serial', 'barcode', 'detail_key', 'detail_value',
+            'weight_min', 'weight_max', 'pieces_min', 'pieces_max',
+        ])->contains(fn ($key) => $request->filled($key));
+    }
+
+    private function operationalReportFilters(Request $request, string $tenantId): array
+    {
+        $validated = $request->validate([
+            'from' => ['nullable', 'date'],
+            'to' => ['nullable', 'date', 'after_or_equal:from'],
+            'product_id' => ['nullable', Rule::exists('products', 'id')->where('tenant_id', $tenantId)],
+            'variant_id' => ['nullable', Rule::exists('product_variants', 'id')->where('tenant_id', $tenantId)],
+            'detail_key' => ['nullable', Rule::exists('dynamic_field_definitions', 'internal_key')->where('tenant_id', $tenantId)],
+            'detail_value' => ['nullable', 'string', 'max:255'],
+            'serial' => ['nullable', 'string', 'max:120'],
+            'barcode' => ['nullable', 'string', 'max:120'],
+            'transaction_number' => ['nullable', 'string', 'max:120'],
+            'customer_id' => ['nullable', Rule::exists('customers', 'id')->where('tenant_id', $tenantId)],
+            'status' => ['nullable', 'string', 'max:50'],
+            'transaction_type' => ['nullable', 'string', 'max:100'],
+            'search' => ['nullable', 'string', 'max:120'],
+            'weight_min' => ['nullable', 'numeric', 'min:0'],
+            'weight_max' => ['nullable', 'numeric', 'gte:weight_min'],
+            'pieces_min' => ['nullable', 'numeric', 'min:0'],
+            'pieces_max' => ['nullable', 'numeric', 'gte:pieces_min'],
+        ]);
+
+        return collect([
+            'product_id', 'variant_id', 'detail_key', 'detail_value', 'serial', 'barcode',
+            'transaction_number', 'customer_id', 'status', 'transaction_type', 'search',
+            'weight_min', 'weight_max', 'pieces_min', 'pieces_max',
+        ])->mapWithKeys(fn ($key) => [$key => trim((string) ($validated[$key] ?? ''))])->all();
+    }
+
+    private function requestFilterValues(?Request $request): array
+    {
+        if (! $request) {
+            return [];
+        }
+
+        return collect([
+            'product_id', 'variant_id', 'detail_key', 'detail_value', 'serial', 'barcode',
+            'transaction_number', 'customer_id', 'status', 'transaction_type', 'search',
+            'weight_min', 'weight_max', 'pieces_min', 'pieces_max',
+        ])->mapWithKeys(fn ($key) => [$key => trim($request->string($key)->toString())])->all();
+    }
+
+    private function applyInventoryFilters($query, array $filters, string $tenantId): void
+    {
+        $query
+            ->when($filters['product_id'] ?? null, fn ($query, $id) => $query->where('product_id', $id))
+            ->when($filters['variant_id'] ?? null, fn ($query, $id) => $query->where('variant_id', $id))
+            ->when($filters['transaction_type'] ?? null, fn ($query, $type) => $query->where('transaction_type', $type))
+            ->when($filters['weight_min'] ?? null, fn ($query, $value) => $query->where('weight_quantity', '>=', (float) $value))
+            ->when($filters['weight_max'] ?? null, fn ($query, $value) => $query->where('weight_quantity', '<=', (float) $value))
+            ->when($filters['pieces_min'] ?? null, fn ($query, $value) => $query->where('piece_quantity', '>=', (float) $value))
+            ->when($filters['pieces_max'] ?? null, fn ($query, $value) => $query->where('piece_quantity', '<=', (float) $value))
+            ->when(($filters['detail_key'] ?? '') !== '' && ($filters['detail_value'] ?? '') !== '', function ($query) use ($filters, $tenantId): void {
+                $key = $filters['detail_key'];
+                $value = $filters['detail_value'];
+                $variantIds = ProductVariant::query()
+                    ->where('tenant_id', $tenantId)
+                    ->where('metadata->dynamic_fields->'.$key, $value)
+                    ->pluck('id');
+                $query->where(fn ($query) => $query
+                    ->where('dynamic_values->'.$key, $value)
+                    ->orWhereJsonContains('dynamic_values->'.$key, $value)
+                    ->orWhereIn('variant_id', $variantIds));
+            })
+            ->when($filters['search'] ?? null, function ($query, string $value) use ($tenantId): void {
+                $search = '%'.$value.'%';
+                $query->where(fn ($query) => $query
+                    ->where('barcode_value', 'like', $search)
+                    ->orWhereIn('product_id', Product::query()->select('id')->where('tenant_id', $tenantId)->where('name', 'like', $search))
+                    ->orWhereIn('variant_id', ProductVariant::query()->select('id')->where('tenant_id', $tenantId)->where('name', 'like', $search))
+                    ->orWhereIn('barcode_value', ProductionTransaction::query()
+                        ->select('barcode_value')
+                        ->where('tenant_id', $tenantId)
+                        ->where(fn ($production) => $production
+                            ->where('serial_number', 'like', $search)
+                            ->orWhere('barcode_value', 'like', $search))));
+            })
+            ->when(($filters['detail_key'] ?? '') !== '' && ($filters['detail_value'] ?? '') !== '', function ($query) use ($filters, $tenantId): void {
+                $key = $filters['detail_key'];
+                $value = $filters['detail_value'];
+                $variantIds = ProductVariant::query()
+                    ->where('tenant_id', $tenantId)
+                    ->where('metadata->dynamic_fields->'.$key, $value)
+                    ->pluck('id');
+                $barcodes = ProductionTransaction::query()
+                    ->select('barcode_value')
+                    ->where('tenant_id', $tenantId)
+                    ->where(fn ($production) => $production
+                        ->where('dynamic_values->'.$key, $value)
+                        ->orWhereJsonContains('dynamic_values->'.$key, $value)
+                        ->orWhereIn('variant_id', $variantIds));
+                $query->whereIn('barcode_value', $barcodes);
             });
     }
 
@@ -1626,6 +1728,7 @@ class AdminPanelController extends Controller
         string $tenantId,
         ?string $productId = null,
         ?string $variantId = null,
+        array $filters = [],
     ) {
         $products = Product::query()->where('tenant_id', $tenantId)->pluck('name', 'id');
         $productions = ProductionTransaction::query()
@@ -1633,8 +1736,22 @@ class AdminPanelController extends Controller
             ->where('status', 'active')
             ->when($productId, fn ($query, $id) => $query->where('product_id', $id))
             ->when($variantId, fn ($query, $id) => $query->where('variant_id', $id))
+            ->when($filters['from'] ?? null, fn ($query, $from) => $query->where('captured_at', '>=', CarbonImmutable::parse($from)->startOfDay()))
+            ->when($filters['to'] ?? null, fn ($query, $to) => $query->where('captured_at', '<=', CarbonImmutable::parse($to)->endOfDay()))
+            ->when($filters['weight_min'] ?? null, fn ($query, $value) => $query->where('net_weight', '>=', (float) $value))
+            ->when($filters['weight_max'] ?? null, fn ($query, $value) => $query->where('net_weight', '<=', (float) $value))
+            ->when($filters['pieces_min'] ?? null, fn ($query, $value) => $query->where('piece_quantity', '>=', (float) $value))
+            ->when($filters['pieces_max'] ?? null, fn ($query, $value) => $query->where('piece_quantity', '<=', (float) $value))
+            ->when($filters['search'] ?? null, function ($query, string $value) use ($tenantId): void {
+                $search = '%'.$value.'%';
+                $query->where(fn ($query) => $query
+                    ->where('serial_number', 'like', $search)
+                    ->orWhere('barcode_value', 'like', $search)
+                    ->orWhereIn('product_id', Product::query()->select('id')->where('tenant_id', $tenantId)->where('name', 'like', $search))
+                    ->orWhereIn('variant_id', ProductVariant::query()->select('id')->where('tenant_id', $tenantId)->where('name', 'like', $search)));
+            })
             ->latest('captured_at')
-            ->limit(300)
+            ->limit(1000)
             ->get(['product_id', 'variant_id', 'dynamic_values', 'net_weight', 'piece_quantity']);
 
         return $productions
@@ -1717,18 +1834,36 @@ class AdminPanelController extends Controller
 
     private function basicPdf(string $title, array $columns, $rows): string
     {
-        $lines = [strtoupper($title).' REPORT', 'Generated: '.now()->format('Y-m-d H:i'), implode(' | ', $columns)];
-        foreach ($rows->take(40) as $row) {
-            $lines[] = implode(' | ', array_map(fn ($column) => (string) data_get($row, $column), $columns));
+        $chunks = collect($rows)->chunk(38)->values();
+        if ($chunks->isEmpty()) {
+            $chunks = collect([collect()]);
         }
-        $text = implode('\\n', array_map(fn ($line) => str_replace(['(', ')', '\\'], ['[', ']', '/'], $line), $lines));
+        $contents = $chunks->map(function ($chunk, int $page) use ($chunks, $title, $columns): string {
+            $lines = [
+                [strtoupper($title).' REPORT', 36, 806, 14],
+                ['Generated: '.now()->format('Y-m-d H:i'), 36, 788, 8],
+                ['Page '.($page + 1).' of '.$chunks->count(), 500, 788, 8],
+                [$this->pdfText(implode(' | ', array_map(fn ($column) => str($column)->replace('_', ' ')->title()->toString(), $columns)), 118), 36, 766, 8],
+            ];
+            $y = 746;
+            foreach ($chunk as $row) {
+                $value = implode(' | ', array_map(fn ($column) => (string) data_get($row, $column), $columns));
+                $lines[] = [$this->pdfText($value, 118), 36, $y, 7.5];
+                $y -= 17;
+            }
+            $content = "0.2 w 32 778 530 1 re f\n32 758 530 1 re f\n";
+            foreach ($lines as [$line, $x, $lineY, $size]) {
+                $content .= 'BT /F1 '.$size.' Tf '.$x.' '.$lineY.' Td ('.$this->pdfEscape((string) $line).") Tj ET\n";
+            }
 
-        return "%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj\n4 0 obj << /Length ".(strlen($text) + 80)." >> stream\nBT /F1 9 Tf 40 760 Td 12 TL (".$text.") Tj ET\nendstream endobj\n5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\nxref\n0 6\n0000000000 65535 f \ntrailer << /Root 1 0 R /Size 6 >>\nstartxref\n0\n%%EOF";
+            return $content;
+        })->all();
+
+        return $this->pdfDocumentPages($contents);
     }
 
-    private function dispatchPdf(Dispatch $dispatch): string
+    private function dispatchPdf(Dispatch $dispatch, $rows): string
     {
-        $rows = $this->dispatchExportRows($dispatch);
         $dynamicColumns = $this->dispatchDynamicColumns($rows, $dispatch->tenant_id);
         $customer = data_get($dispatch->customer_snapshot, 'name', '-');
         $address = data_get($dispatch->customer_snapshot, 'shipping_address', '-');
@@ -1737,63 +1872,22 @@ class AdminPanelController extends Controller
             array_keys($this->selectedReportColumns('dispatch', $dynamicColumns))
         );
 
-        $logo = $this->reportLogo($dispatch->tenant_id);
-        $lines = [
-            ...$this->pdfHeaderLines($dispatch->tenant_id, 'DISPATCH / MATERIAL ISSUE REPORT'),
-            ['Customer: '.$customer, 28, 724, 10],
-            ['Dispatch No: '.$dispatch->dispatch_number, 28, 706, 8],
-            ['Date: '.(($dispatch->confirmed_at ?? $dispatch->created_at)?->format('d M Y H:i') ?? '-'), 176, 706, 8],
-            ['Address: '.$address, 28, 690, 7],
-        ];
-
-        $tableTop = 650;
-        $rowHeight = 24;
-        $headerY = $tableTop - 15;
-        foreach ($columns as $column) {
-            $lines[] = [$column['label'], $column['x'] + 3, $headerY, 6.8];
-        }
-
-        $y = $tableTop - $rowHeight - 14;
-        foreach ($rows->take(22) as $index => $row) {
-            foreach ($columns as $column) {
-                $value = match ($column['key']) {
-                    'sr' => (string) ($index + 1),
-                    'product_name' => $row['product_name'],
-                    'gross_weight' => (string) $row['gross_weight'],
-                    'tare_weight' => (string) $row['tare_weight'],
-                    'net_weight' => (string) $row['net_weight'],
-                    'converted_unit' => $row['converted_unit'],
-                    'barcode_value' => $row['barcode_value'],
-                    default => (string) data_get($row, 'product_fields.'.$column['key'], '-'),
-                };
-                $lines[] = [$value, $column['x'] + 3, $y, 6.4];
-            }
-            $y -= $rowHeight;
-        }
-
-        $lines[] = ['SUMMARY', 28, 110, 10];
-        $lines[] = ['Total labels: '.$rows->count(), 28, 92, 8];
-        $lines[] = ['Gross: '.$rows->sum('gross_weight').' kg', 126, 92, 8];
-        $lines[] = ['Tare: '.$rows->sum('tare_weight').' kg', 232, 92, 8];
-        $lines[] = ['Net: '.$rows->sum('net_weight').' kg', 338, 92, 8];
-        $lines[] = ['Converted: '.$rows->sum('piece_quantity'), 444, 92, 8];
-        $lines = [...$lines, ...$this->pdfFooterLines($dispatch->tenant_id)];
-
-        $text = ($logo ? "q 44 0 0 34 28 796 cm /Im1 Do Q\n" : '');
-        $text .= "0.2 w 24 734 548 1 re f\n";
-        $text .= "24 668 548 1 re f\n";
-        $text .= $this->dispatchTableGrid($columns, $tableTop, $rowHeight, 23);
-        $text .= "24 122 548 1 re f\n24 58 548 1 re f\n";
-        foreach ($lines as [$line, $x, $lineY, $size]) {
-            $text .= 'BT /F1 '.$size.' Tf '.$x.' '.$lineY.' Td ('.$this->pdfEscape((string) $line).") Tj ET\n";
-        }
-
-        return $this->pdfDocument($text, image: $logo);
+        return $this->operationalReportPdf(
+            $dispatch->tenant_id,
+            'DISPATCH REPORT',
+            [
+                ['Customer: '.$customer, 28, 724, 10],
+                ['Dispatch No: '.$dispatch->dispatch_number, 28, 706, 8],
+                ['Date: '.(($dispatch->confirmed_at ?? $dispatch->created_at)?->format('d M Y H:i') ?? '-'), 176, 706, 8],
+                ['Address: '.$address, 28, 690, 7],
+            ],
+            $rows,
+            $columns,
+        );
     }
 
-    private function inwardPdf(string $session, $productions, string $tenantId, ?InwardSession $inwardSession = null): string
+    private function inwardPdf(string $session, $productions, string $tenantId, ?InwardSession $inwardSession, $rows): string
     {
-        $rows = $this->inwardExportRows($productions, $tenantId);
         $dynamicColumns = $this->dispatchDynamicColumns($rows, $tenantId);
         $columns = $this->dispatchPdfColumns(
             $dynamicColumns,
@@ -1803,90 +1897,156 @@ class AdminPanelController extends Controller
         $startedAt = $productions->first()?->captured_at;
         $endedAt = $productions->last()?->captured_at;
 
-        $logo = $this->reportLogo($tenantId);
-        $lines = [
-            ...$this->pdfHeaderLines($tenantId, 'INWARD / MATERIAL RECEIPT REPORT'),
-            ['Inward No: '.($inwardSession?->session_number ?? 'INW-'.$date->format('Ymd')), 28, 724, 9],
-            ['Started: '.($startedAt?->format('d M Y H:i') ?? '-'), 28, 706, 8],
-            ['Ended: '.($endedAt?->format('d M Y H:i') ?? '-'), 176, 706, 8],
-            ['Entries: '.$rows->count(), 310, 706, 8],
-            ['Session Date: '.$date->format('d M Y'), 430, 706, 8],
-        ];
-
-        $tableTop = 668;
-        $rowHeight = 24;
-        $headerY = $tableTop - 15;
-        foreach ($columns as $column) {
-            $lines[] = [$column['label'], $column['x'] + 3, $headerY, 6.8];
-        }
-
-        $y = $tableTop - $rowHeight - 14;
-        foreach ($rows->take(23) as $index => $row) {
-            foreach ($columns as $column) {
-                $value = match ($column['key']) {
-                    'sr' => (string) ($index + 1),
-                    'product_name' => $row['product_name'],
-                    'gross_weight' => (string) $row['gross_weight'],
-                    'tare_weight' => (string) $row['tare_weight'],
-                    'net_weight' => (string) $row['net_weight'],
-                    'converted_unit' => $row['converted_unit'],
-                    'barcode_value' => $row['barcode_value'],
-                    default => (string) data_get($row, 'product_fields.'.$column['key'], '-'),
-                };
-                $lines[] = [$value, $column['x'] + 3, $y, 6.4];
-            }
-            $y -= $rowHeight;
-        }
-
-        $lines[] = ['SUMMARY', 28, 92, 10];
-        $lines[] = ['Total entries: '.$rows->count(), 28, 74, 8];
-        $lines[] = ['Gross: '.$rows->sum('gross_weight').' kg', 126, 74, 8];
-        $lines[] = ['Tare: '.$rows->sum('tare_weight').' kg', 232, 74, 8];
-        $lines[] = ['Net: '.$rows->sum('net_weight').' kg', 338, 74, 8];
-        $lines[] = ['Converted: '.$rows->sum('piece_quantity'), 444, 74, 8];
-        $lines = [...$lines, ...$this->pdfFooterLines($tenantId)];
-
-        $text = ($logo ? "q 44 0 0 34 28 796 cm /Im1 Do Q\n" : '');
-        $text .= "0.2 w 24 734 548 1 re f\n";
-        $text .= "24 686 548 1 re f\n";
-        $text .= $this->dispatchTableGrid($columns, $tableTop, $rowHeight, 24);
-        $text .= "24 104 548 1 re f\n";
-        foreach ($lines as [$line, $x, $lineY, $size]) {
-            $text .= 'BT /F1 '.$size.' Tf '.$x.' '.$lineY.' Td ('.$this->pdfEscape((string) $line).") Tj ET\n";
-        }
-
-        return $this->pdfDocument($text, image: $logo);
+        return $this->operationalReportPdf(
+            $tenantId,
+            'INWARD REPORT',
+            [
+                ['Inward No: '.($inwardSession?->session_number ?? 'INW-'.$date->format('Ymd')), 28, 724, 9],
+                ['Started: '.($startedAt?->format('d M Y H:i') ?? '-'), 28, 706, 8],
+                ['Ended: '.($endedAt?->format('d M Y H:i') ?? '-'), 176, 706, 8],
+                ['Entries: '.$rows->count(), 310, 706, 8],
+                ['Session Date: '.$date->format('d M Y'), 430, 706, 8],
+            ],
+            $rows,
+            $columns,
+        );
     }
 
-    private function dispatchExportRows(Dispatch $dispatch)
+    private function operationalReportPdf(string $tenantId, string $title, array $metadataLines, $rows, array $columns): string
+    {
+        $logo = $this->reportLogo($tenantId);
+        $detailChunks = $rows->chunk(18)->values();
+        $summaryRows = $this->operationalSummaryRows($rows);
+        $summaryChunks = $summaryRows->chunk(16)->values();
+        $pageKinds = [
+            ...$detailChunks->map(fn ($chunk) => ['type' => 'detail', 'rows' => $chunk])->all(),
+            ...$summaryChunks->map(fn ($chunk) => ['type' => 'summary', 'rows' => $chunk])->all(),
+        ];
+        $pageCount = count($pageKinds);
+        $contents = [];
+        $detailOffset = 0;
+
+        foreach ($pageKinds as $pageIndex => $page) {
+            $lines = [
+                ...$this->pdfHeaderLines($tenantId, $page['type'] === 'summary' ? $title.' - PRODUCT SUMMARY' : $title),
+                ...($page['type'] === 'detail' ? $metadataLines : []),
+                ['Page '.($pageIndex + 1).' of '.$pageCount, 500, 52, 7],
+                ...$this->pdfFooterLines($tenantId),
+            ];
+            $text = ($logo ? "q 44 0 0 34 28 796 cm /Im1 Do Q\n" : '');
+            $text .= "0.2 w 24 734 548 1 re f\n";
+
+            if ($page['type'] === 'detail') {
+                $tableTop = 650;
+                $rowHeight = 24;
+                foreach ($columns as $column) {
+                    $lines[] = [$this->pdfCellText($column['label'], $column['width']), $column['x'] + 3, $tableTop - 15, 6.8];
+                }
+                $y = $tableTop - $rowHeight - 14;
+                foreach ($page['rows']->values() as $index => $row) {
+                    foreach ($columns as $column) {
+                        $value = match ($column['key']) {
+                            'sr' => (string) ($detailOffset + $index + 1),
+                            'product_name' => $row['product_name'],
+                            'gross_weight' => (string) $row['gross_weight'],
+                            'tare_weight' => (string) $row['tare_weight'],
+                            'net_weight' => (string) $row['net_weight'],
+                            'converted_unit' => $row['converted_unit'],
+                            'barcode_value' => $row['barcode_value'],
+                            'captured_at' => $row['captured_at'] ?? '-',
+                            default => (string) data_get($row, 'product_fields.'.$column['key'], '-'),
+                        };
+                        $lines[] = [$this->pdfCellText($value, $column['width']), $column['x'] + 3, $y, 6.4];
+                    }
+                    $y -= $rowHeight;
+                }
+                $text .= "24 668 548 1 re f\n";
+                $text .= $this->dispatchTableGrid($columns, $tableTop, $rowHeight, $page['rows']->count() + 1);
+                if ($pageIndex === $detailChunks->count() - 1) {
+                    $lines[] = ['FILTERED TOTALS', 28, 160, 9];
+                    $lines[] = ['Sticker PCS: '.$rows->count(), 28, 143, 7.5];
+                    $lines[] = ['Gross: '.round($rows->sum('gross_weight'), 3).' kg', 126, 143, 7.5];
+                    $lines[] = ['Tare: '.round($rows->sum('tare_weight'), 3).' kg', 232, 143, 7.5];
+                    $lines[] = ['Net: '.round($rows->sum('net_weight'), 3).' kg', 338, 143, 7.5];
+                    $lines[] = ['Converted PCS: '.round($rows->sum('piece_quantity'), 2), 444, 143, 7.5];
+                }
+                $detailOffset += $page['rows']->count();
+            } else {
+                $summaryColumns = [
+                    ['key' => 'product', 'label' => 'Product', 'x' => 24, 'width' => 110],
+                    ['key' => 'variant_details', 'label' => 'Variant / Details', 'x' => 134, 'width' => 170],
+                    ['key' => 'sticker_pcs', 'label' => 'Sticker PCS', 'x' => 304, 'width' => 52],
+                    ['key' => 'gross_kg', 'label' => 'Gross kg', 'x' => 356, 'width' => 52],
+                    ['key' => 'tare_kg', 'label' => 'Tare kg', 'x' => 408, 'width' => 46],
+                    ['key' => 'net_kg', 'label' => 'Net kg', 'x' => 454, 'width' => 50],
+                    ['key' => 'converted_pcs', 'label' => 'Conv. PCS', 'x' => 504, 'width' => 68],
+                ];
+                $tableTop = 700;
+                $rowHeight = 28;
+                foreach ($summaryColumns as $column) {
+                    $lines[] = [$this->pdfCellText($column['label'], $column['width']), $column['x'] + 3, $tableTop - 17, 6.5];
+                }
+                $y = $tableTop - $rowHeight - 17;
+                foreach ($page['rows'] as $row) {
+                    foreach ($summaryColumns as $column) {
+                        $lines[] = [$this->pdfCellText((string) $row[$column['key']], $column['width']), $column['x'] + 3, $y, 6.2];
+                    }
+                    $y -= $rowHeight;
+                }
+                $text .= $this->dispatchTableGrid($summaryColumns, $tableTop, $rowHeight, $page['rows']->count() + 1);
+            }
+
+            foreach ($lines as [$line, $x, $lineY, $size]) {
+                $text .= 'BT /F1 '.$size.' Tf '.$x.' '.$lineY.' Td ('.$this->pdfEscape((string) $line).") Tj ET\n";
+            }
+            $contents[] = $text;
+        }
+
+        return $this->pdfDocumentPages($contents, image: $logo);
+    }
+
+    private function pdfCellText(string $value, float $width): string
+    {
+        return $this->pdfText($value, max(4, (int) floor($width / 4.5)));
+    }
+
+    private function dispatchExportRows(Dispatch $dispatch, ?Request $request = null)
     {
         $productions = ProductionTransaction::query()
             ->where('tenant_id', $dispatch->tenant_id)
             ->whereIn('id', $dispatch->items->pluck('production_transaction_id')->filter())
             ->get()
             ->keyBy('id');
+        $variants = ProductVariant::query()
+            ->where('tenant_id', $dispatch->tenant_id)
+            ->whereIn('id', $productions->pluck('variant_id')->filter()->unique())
+            ->get()
+            ->keyBy('id');
 
-        return $dispatch->items->map(function ($item) use ($productions, $dispatch): array {
+        return $dispatch->items->map(function ($item) use ($productions, $variants): array {
             $production = $productions->get($item->production_transaction_id);
-            $variantFields = ProductVariant::query()
-                ->where('tenant_id', $dispatch->tenant_id)
-                ->find($production?->variant_id)?->metadata['dynamic_fields'] ?? [];
+            $variant = $variants->get($production?->variant_id);
+            $variantFields = $variant?->metadata['dynamic_fields'] ?? [];
             $dynamic = collect($variantFields)
                 ->merge($production?->dynamic_values ?? [])
                 ->mapWithKeys(fn ($value, $key) => [$key => is_array($value) ? implode(',', $value) : $value])
                 ->all();
 
             return [
+                'product_id' => $production?->product_id,
+                'variant_id' => $production?->variant_id,
                 'product_name' => $this->productionProductName($production),
+                'variant_name' => $variant?->name ?? '-',
                 'product_fields' => $dynamic,
+                'serial_number' => $production?->serial_number ?? '-',
                 'gross_weight' => (float) ($production?->gross_weight ?? $item->weight_quantity),
                 'tare_weight' => (float) ($production?->tare_weight ?? 0),
                 'net_weight' => (float) ($production?->net_weight ?? $item->weight_quantity),
                 'piece_quantity' => (float) ($production?->piece_quantity ?? $item->piece_quantity ?? 0),
-                'converted_unit' => filled($production?->piece_quantity ?? $item->piece_quantity) ? ($production?->piece_quantity ?? $item->piece_quantity).' pcs' : '-',
+                'converted_unit' => $this->formattedPieceQuantity($production?->piece_quantity ?? $item->piece_quantity),
                 'barcode_value' => $item->barcode_value,
             ];
-        });
+        })->filter(fn ($row) => $this->exportRowMatchesRequest($row, $request))->values();
     }
 
     private function inwardExportRows($productions, string $tenantId)
@@ -1905,17 +2065,97 @@ class AdminPanelController extends Controller
                 ->all();
 
             return [
+                'product_id' => $production->product_id,
+                'variant_id' => $production->variant_id,
                 'product_name' => $this->productionProductName($production),
+                'variant_name' => $variants->get($production->variant_id)?->name ?? '-',
                 'product_fields' => $dynamic,
+                'serial_number' => $production->serial_number,
                 'gross_weight' => (float) $production->gross_weight,
                 'tare_weight' => (float) $production->tare_weight,
                 'net_weight' => (float) $production->net_weight,
                 'piece_quantity' => (float) ($production->piece_quantity ?? 0),
-                'converted_unit' => filled($production->piece_quantity) ? $production->piece_quantity.' pcs' : '-',
+                'converted_unit' => $this->formattedPieceQuantity($production->piece_quantity),
                 'barcode_value' => $production->barcode_value,
                 'captured_at' => $production->captured_at?->format('Y-m-d H:i'),
             ];
         });
+    }
+
+    private function formattedPieceQuantity($value): string
+    {
+        if (! filled($value)) {
+            return '-';
+        }
+
+        return rtrim(rtrim(number_format((float) $value, 3, '.', ''), '0'), '.').' pcs';
+    }
+
+    private function exportRowMatchesRequest(array $row, ?Request $request): bool
+    {
+        if (! $request) {
+            return true;
+        }
+
+        $contains = fn ($actual, string $needle): bool => str_contains(mb_strtolower((string) $actual), mb_strtolower($needle));
+        if ($request->filled('product_id') && (string) $row['product_id'] !== $request->string('product_id')->toString()) {
+            return false;
+        }
+        if ($request->filled('variant_id') && (string) $row['variant_id'] !== $request->string('variant_id')->toString()) {
+            return false;
+        }
+        if ($request->filled('serial') && ! $contains($row['serial_number'], $request->string('serial')->toString())) {
+            return false;
+        }
+        if ($request->filled('barcode') && ! $contains($row['barcode_value'], $request->string('barcode')->toString())) {
+            return false;
+        }
+        if ($request->filled('detail_key') && $request->filled('detail_value')) {
+            if ((string) data_get($row, 'product_fields.'.$request->string('detail_key')->toString(), '') !== $request->string('detail_value')->toString()) {
+                return false;
+            }
+        }
+        foreach ([['weight_min', 'net_weight', 'min'], ['weight_max', 'net_weight', 'max'], ['pieces_min', 'piece_quantity', 'min'], ['pieces_max', 'piece_quantity', 'max']] as [$filter, $field, $direction]) {
+            if (! $request->filled($filter)) {
+                continue;
+            }
+            $expected = $request->float($filter);
+            $actual = (float) $row[$field];
+            if (($direction === 'min' && $actual < $expected) || ($direction === 'max' && $actual > $expected)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function operationalSummaryRows($rows)
+    {
+        return $rows
+            ->groupBy(fn ($row) => implode('|', [
+                $row['product_id'] ?? $row['product_name'],
+                $row['variant_id'] ?? '',
+                json_encode($row['product_fields'] ?? []),
+            ]))
+            ->map(function ($group): array {
+                $first = $group->first();
+                $details = collect($first['product_fields'] ?? [])
+                    ->filter(fn ($value) => filled($value))
+                    ->map(fn ($value, $key) => str($key)->replace('_', ' ')->title().': '.$value)
+                    ->implode(', ');
+
+                return [
+                    'product' => $first['product_name'],
+                    'variant_details' => collect([$first['variant_name'] ?? null, $details])->filter(fn ($value) => filled($value) && $value !== '-')->implode(' | ') ?: '-',
+                    'sticker_pcs' => $group->count(),
+                    'gross_kg' => round($group->sum('gross_weight'), 3),
+                    'tare_kg' => round($group->sum('tare_weight'), 3),
+                    'net_kg' => round($group->sum('net_weight'), 3),
+                    'converted_pcs' => round($group->sum('piece_quantity'), 2),
+                ];
+            })
+            ->sortBy('product')
+            ->values();
     }
 
     private function dispatchDynamicColumns($rows, string $tenantId)
@@ -2225,6 +2465,52 @@ class AdminPanelController extends Controller
         }
 
         return $pdf.'trailer << /Root 1 0 R /Size '.(count($objects) + 1)." >>\nstartxref\n".$xref."\n%%EOF";
+    }
+
+    private function pdfDocumentPages(array $contents, bool $landscape = false, ?array $image = null): string
+    {
+        $mediaBox = $landscape ? '[0 0 842 595]' : '[0 0 595 842]';
+        $pageCount = count($contents);
+        $pageIds = range(3, 2 + $pageCount);
+        $contentStart = 3 + $pageCount;
+        $fontId = $contentStart + $pageCount;
+        $imageId = $image ? $fontId + 1 : null;
+        $objects = [];
+        $objects[1] = '<< /Type /Catalog /Pages 2 0 R >>';
+        $objects[2] = '<< /Type /Pages /Kids ['.implode(' ', array_map(fn ($id) => $id.' 0 R', $pageIds)).'] /Count '.$pageCount.' >>';
+
+        foreach ($contents as $index => $content) {
+            $pageId = $pageIds[$index];
+            $contentId = $contentStart + $index;
+            $resource = '/Font << /F1 '.$fontId.' 0 R >>';
+            if ($imageId) {
+                $resource .= ' /XObject << /Im1 '.$imageId.' 0 R >>';
+            }
+            $objects[$pageId] = '<< /Type /Page /Parent 2 0 R /MediaBox '.$mediaBox.' /Contents '.$contentId.' 0 R /Resources << '.$resource.' >> >>';
+            $objects[$contentId] = '<< /Length '.strlen($content).">>\nstream\n".$content.'endstream';
+        }
+        $objects[$fontId] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>';
+        if ($imageId) {
+            $objects[$imageId] = "<< /Type /XObject /Subtype /Image /Width {$image['width']} /Height {$image['height']} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ".strlen($image['data'])." >>\nstream\n".$image['data'].'endstream';
+        }
+        ksort($objects);
+
+        $pdf = "%PDF-1.4\n";
+        $offsets = [0];
+        foreach ($objects as $id => $object) {
+            $offsets[$id] = strlen($pdf);
+            $pdf .= $id." 0 obj\n".$object."\nendobj\n";
+        }
+        $xref = strlen($pdf);
+        $size = max(array_keys($objects)) + 1;
+        $pdf .= "xref\n0 {$size}\n0000000000 65535 f \n";
+        for ($id = 1; $id < $size; $id++) {
+            $pdf .= isset($offsets[$id])
+                ? str_pad((string) $offsets[$id], 10, '0', STR_PAD_LEFT)." 00000 n \n"
+                : "0000000000 00000 f \n";
+        }
+
+        return $pdf.'trailer << /Root 1 0 R /Size '.$size.">>\nstartxref\n".$xref."\n%%EOF";
     }
 
     private function pdfEscape(string $text): string

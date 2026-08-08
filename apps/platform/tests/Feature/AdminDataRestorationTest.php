@@ -2,7 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Models\Customer;
+use App\Models\Dispatch;
+use App\Models\DispatchItem;
 use App\Models\InventoryTransaction;
+use App\Models\InwardSession;
 use App\Models\Permission;
 use App\Models\ProductConfiguration\DynamicFieldDefinition;
 use App\Models\ProductConfiguration\DynamicFieldValue;
@@ -368,6 +372,122 @@ class AdminDataRestorationTest extends TestCase
         ]))
             ->assertOk()
             ->assertHeader('content-type', 'application/pdf');
+    }
+
+    public function test_operational_report_filters_are_exact_and_downloads_match_the_filtered_rows(): void
+    {
+        [$tenant, $admin] = $this->adminUser();
+        $product = $this->product($tenant, 'Precision Product', 'PRECISION');
+        $field = DynamicFieldDefinition::query()->create([
+            'tenant_id' => $tenant->id,
+            'field_label' => 'Color',
+            'internal_key' => 'color',
+            'entity_type' => 'product_variant',
+            'data_type' => 'dropdown',
+            'dropdown_options' => [
+                ['label' => 'Red', 'value' => 'red'],
+                ['label' => 'Blue', 'value' => 'blue'],
+            ],
+            'is_active' => true,
+        ]);
+        $red = ProductVariant::query()->create([
+            'tenant_id' => $tenant->id,
+            'product_id' => $product->id,
+            'name' => 'Red Variant',
+            'variant_code' => 'RED',
+            'metadata' => ['dynamic_fields' => [$field->internal_key => 'red']],
+            'is_active' => true,
+        ]);
+        $blue = ProductVariant::query()->create([
+            'tenant_id' => $tenant->id,
+            'product_id' => $product->id,
+            'name' => 'Blue Variant',
+            'variant_code' => 'BLUE',
+            'metadata' => ['dynamic_fields' => [$field->internal_key => 'blue']],
+            'is_active' => true,
+        ]);
+        $session = InwardSession::query()->create([
+            'tenant_id' => $tenant->id,
+            'session_number' => 'INW-FILTER-001',
+            'status' => 'saved',
+            'started_at' => now()->subMinute(),
+            'ended_at' => now(),
+        ]);
+        $customer = Customer::query()->create([
+            'tenant_id' => $tenant->id,
+            'name' => 'Filter Customer',
+            'code' => 'FILTER-CUSTOMER',
+            'is_active' => true,
+        ]);
+        $dispatch = Dispatch::query()->create([
+            'tenant_id' => $tenant->id,
+            'customer_id' => $customer->id,
+            'dispatch_number' => 'D-260808-0001',
+            'customer_snapshot' => $customer->toArray(),
+            'status' => 'confirmed',
+            'total_weight' => 370,
+            'total_pieces' => 19,
+            'confirmed_at' => now(),
+        ]);
+
+        foreach (range(1, 19) as $number) {
+            $isRed = $number === 1;
+            $variant = $isRed ? $red : $blue;
+            $color = $isRed ? 'red' : 'blue';
+            $production = ProductionTransaction::query()->create([
+                'tenant_id' => $tenant->id,
+                'product_id' => $product->id,
+                'variant_id' => $variant->id,
+                'inward_session_id' => $session->id,
+                'serial_number' => 'SER-'.$color.'-'.$number,
+                'barcode_value' => 'BAR-'.$color.'-'.$number,
+                'product_snapshot' => ['name' => 'Precision Product'],
+                'dynamic_values' => ['color' => $color],
+                'gross_weight' => $isRed ? 10 : 20,
+                'tare_weight' => 0,
+                'net_weight' => $isRed ? 10 : 20,
+                'piece_quantity' => 1,
+                'captured_at' => now(),
+            ]);
+            DispatchItem::query()->create([
+                'tenant_id' => $tenant->id,
+                'dispatch_id' => $dispatch->id,
+                'production_transaction_id' => $production->id,
+                'barcode_value' => $production->barcode_value,
+                'weight_quantity' => $production->net_weight,
+                'piece_quantity' => 1,
+            ]);
+        }
+
+        $query = http_build_query([
+            'product_id' => $product->id,
+            'variant_id' => $red->id,
+            'detail_key' => 'color',
+            'detail_value' => 'red',
+            'weight_min' => 9,
+            'weight_max' => 11,
+        ]);
+        $inwardCsv = $this->actingAs($admin)->get('/inward/'.$session->id.'/export/csv?'.$query);
+        $inwardCsv->assertOk();
+        $inwardContent = $inwardCsv->streamedContent();
+        $this->assertStringContainsString('BAR-red-1', $inwardContent);
+        $this->assertStringNotContainsString('BAR-blue-2', $inwardContent);
+        $dispatchCsv = $this->actingAs($admin)->get('/dispatch/'.$dispatch->id.'/export/csv?'.$query);
+        $dispatchCsv->assertOk();
+        $dispatchContent = $dispatchCsv->streamedContent();
+        $this->assertStringContainsString('BAR-red-1', $dispatchContent);
+        $this->assertStringNotContainsString('BAR-blue-2', $dispatchContent);
+
+        $filteredPdf = $this->actingAs($admin)->get('/dispatch/'.$dispatch->id.'/export/pdf?'.$query);
+        $filteredPdf->assertOk();
+        $this->assertStringContainsString('DISPATCH REPORT', $filteredPdf->getContent());
+        $this->assertStringNotContainsString('MATERIAL ISSUE', $filteredPdf->getContent());
+        $this->assertStringContainsString('/Count 2', $filteredPdf->getContent());
+        $this->assertStringContainsString('PRODUCT SUMMARY', $filteredPdf->getContent());
+
+        $completePdf = $this->actingAs($admin)->get('/dispatch/'.$dispatch->id.'/export/pdf');
+        $completePdf->assertOk();
+        $this->assertStringContainsString('/Count 3', $completePdf->getContent());
     }
 
     public function test_role_creation_is_tenant_scoped_and_rejects_duplicates(): void

@@ -193,6 +193,53 @@ class InwardSessionSyncTest extends TestCase
         $this->assertSame(1, DispatchItem::query()->where('tenant_id', $tenant->id)->where('barcode_value', 'BAR-DSP-1')->count());
     }
 
+    public function test_server_generated_dispatch_numbers_are_short_and_sequential_per_day(): void
+    {
+        [$tenant, $token] = $this->tenantToken(['production.capture', 'dispatch.confirm']);
+        $product = Product::query()->create([
+            'tenant_id' => $tenant->id,
+            'name' => 'Numbered Roll',
+            'product_code' => 'NUMBERED',
+            'default_tare_weight' => 0,
+            'is_active' => true,
+        ]);
+        $customer = Customer::query()->create([
+            'tenant_id' => $tenant->id,
+            'name' => 'Number Buyer',
+            'code' => 'NUMBER-BUYER',
+            'is_active' => true,
+        ]);
+
+        foreach ([1, 2] as $number) {
+            $barcode = 'BAR-SHORT-'.$number;
+            $this->withToken($token)
+                ->withHeader('X-Tenant-Id', $tenant->id)
+                ->withHeader('Idempotency-Key', 'idem-short-production-'.$number)
+                ->postJson('/api/v1/sync/production_transaction', [
+                    'id' => 'local-short-production-'.$number,
+                    'product_id' => $product->id,
+                    'serial_number' => 'SER-SHORT-'.$number,
+                    'barcode_value' => $barcode,
+                    'gross_weight' => 5,
+                    'tare_weight' => 0,
+                    'net_weight' => 5,
+                    'captured_at' => now()->toISOString(),
+                ])->assertOk();
+
+            $this->withToken($token)
+                ->withHeader('X-Tenant-Id', $tenant->id)
+                ->withHeader('Idempotency-Key', 'idem-short-dispatch-'.$number)
+                ->postJson('/api/v1/sync/dispatch', [
+                    'id' => 'local-short-dispatch-'.$number,
+                    'customer_id' => $customer->id,
+                    'barcodes' => [$barcode],
+                    'confirmed_at' => now()->toISOString(),
+                ])
+                ->assertOk()
+                ->assertJsonPath('dispatch_number', 'D-'.now()->format('ymd').'-'.str_pad((string) $number, 4, '0', STR_PAD_LEFT));
+        }
+    }
+
     public function test_dispatch_lookup_repairs_missing_barcode_record_from_synced_production(): void
     {
         [$tenant, $token] = $this->tenantToken(['dispatch.confirm']);
