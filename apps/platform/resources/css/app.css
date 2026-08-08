@@ -933,6 +933,54 @@ body.admin-body {
     align-items: center;
 }
 
+.report-filter-card {
+    display: grid;
+    gap: 14px;
+}
+
+.report-quick-filters,
+.active-filter-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.report-filter-grid {
+    align-items: end;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    width: 100%;
+}
+
+.report-advanced-filters {
+    background: #f8fbff;
+    border: 1px solid #cfe2ff;
+    border-radius: 12px;
+    grid-column: 1 / -1;
+    padding: 10px 12px;
+}
+
+.report-advanced-filters summary {
+    color: #174ea6;
+    cursor: pointer;
+    font-weight: 800;
+}
+
+.report-advanced-filters .report-filter-grid {
+    display: grid;
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.active-filter-chips span {
+    background: #eaf2ff;
+    border: 1px solid #bdd4ff;
+    border-radius: 999px;
+    color: #173b73;
+    font-size: 12px;
+    padding: 7px 11px;
+}
+
 .global-search {
     display: flex;
     align-items: center;

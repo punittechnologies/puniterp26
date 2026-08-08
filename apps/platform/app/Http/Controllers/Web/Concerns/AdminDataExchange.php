@@ -347,13 +347,21 @@ trait AdminDataExchange
             'format' => ['required', Rule::in(['xlsx', 'pdf'])],
             'product_id' => ['nullable', Rule::exists('products', 'id')->where('tenant_id', $tenantId)],
             'variant_id' => ['nullable', Rule::exists('product_variants', 'id')->where('tenant_id', $tenantId)],
+            'detail_key' => ['nullable', Rule::exists('dynamic_field_definitions', 'internal_key')->where('tenant_id', $tenantId)],
+            'detail_value' => ['nullable', 'string', 'max:255'],
+            'transaction_type' => ['nullable', 'string', 'max:100'],
+            'search' => ['nullable', 'string', 'max:120'],
+            'weight_min' => ['nullable', 'numeric', 'min:0'],
+            'weight_max' => ['nullable', 'numeric', 'gte:weight_min'],
+            'pieces_min' => ['nullable', 'numeric', 'min:0'],
+            'pieces_max' => ['nullable', 'numeric', 'gte:pieces_min'],
         ]);
         $asOf = CarbonImmutable::parse($data['stock_date'])->endOfDay();
-        $rows = InventoryTransaction::query()
+        $query = InventoryTransaction::query()
             ->where('tenant_id', $tenantId)
-            ->where('occurred_at', '<=', $asOf)
-            ->when($data['product_id'] ?? null, fn ($query, $id) => $query->where('product_id', $id))
-            ->when($data['variant_id'] ?? null, fn ($query, $id) => $query->where('variant_id', $id))
+            ->where('occurred_at', '<=', $asOf);
+        $this->applyInventoryFilters($query, $data, $tenantId);
+        $rows = $query
             ->select('product_id', 'variant_id')
             ->selectRaw($this->inventoryWeightExpression().' as weight')
             ->selectRaw($this->inventoryPieceExpression().' as pieces')

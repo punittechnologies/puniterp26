@@ -349,7 +349,7 @@ class OperationsSyncService
 
                 $totalWeight = $productions->sum(fn (ProductionTransaction $item) => (float) $item->net_weight);
                 $totalPieces = $productions->sum(fn (ProductionTransaction $item) => (float) ($item->piece_quantity ?? 0));
-                $number = $payload['dispatch_number'] ?? $this->nextDispatchNumber();
+                $number = $payload['dispatch_number'] ?? $this->nextDispatchNumber($tenantId);
 
                 $dispatch = Dispatch::query()->create([
                     'tenant_id' => $tenantId,
@@ -577,9 +577,30 @@ class OperationsSyncService
         return strtoupper(preg_replace('/[^A-Za-z0-9_-]+/', '', trim($barcode)) ?: '');
     }
 
-    private function nextDispatchNumber(): string
+    private function nextDispatchNumber(string $tenantId): string
     {
-        return 'DSP-'.now()->format('Ymd-His-u');
+        $date = now()->toDateString();
+
+        DB::table('dispatch_number_sequences')->insertOrIgnore([
+            'tenant_id' => $tenantId,
+            'sequence_date' => $date,
+            'last_number' => 0,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $sequence = DB::table('dispatch_number_sequences')
+            ->where('tenant_id', $tenantId)
+            ->where('sequence_date', $date)
+            ->lockForUpdate()
+            ->first();
+        $next = ((int) ($sequence?->last_number ?? 0)) + 1;
+        DB::table('dispatch_number_sequences')
+            ->where('tenant_id', $tenantId)
+            ->where('sequence_date', $date)
+            ->update(['last_number' => $next, 'updated_at' => now()]);
+
+        return 'D-'.now()->format('ymd').'-'.str_pad((string) $next, 4, '0', STR_PAD_LEFT);
     }
 
     private function findExistingProduction(array $payload, string $tenantId, ?string $idempotencyKey): ?ProductionTransaction

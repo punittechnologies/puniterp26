@@ -9,7 +9,7 @@
             ['Product Batches', route('admin.batches'), 'products.view'],
             ['Label Templates', route('admin.labels'), 'label_templates.view'],
             ['Inward Report', route('admin.inward-report'), 'reports.view'],
-            ['Dispatch Report / Packing List', route('admin.dispatch-report'), 'reports.view'],
+            ['Dispatch Report', route('admin.dispatch-report'), 'reports.view'],
         ],
         'Operations' => [
             ['Production Entry', route('admin.production'), 'production.capture'],
