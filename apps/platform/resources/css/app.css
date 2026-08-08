@@ -968,10 +968,11 @@ body.admin-body {
     width: 100%;
 }
 
-.report-filter-form {
+.filter-bar.report-filter-form {
     align-items: stretch;
     display: grid;
     gap: 14px;
+    grid-template-columns: minmax(0, 1fr);
 }
 
 .report-filter-primary-grid {
@@ -1080,7 +1081,7 @@ body.admin-body {
 .detail-condition-grid {
     display: grid;
     gap: 10px;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(260px, 360px));
     width: 100%;
 }
 
