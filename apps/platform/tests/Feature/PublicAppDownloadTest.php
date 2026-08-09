@@ -13,11 +13,13 @@ class PublicAppDownloadTest extends TestCase
         $this->get('/')
             ->assertOk()
             ->assertSee('Download Latest PUNIT ERP App')
+            ->assertSee('Version 1.1.19 (Build 24)')
             ->assertSee(route('app.download.latest'));
 
         $this->get('/login')
             ->assertOk()
             ->assertSee('Download Latest PUNIT ERP App')
+            ->assertSee('Version 1.1.19 (Build 24)')
             ->assertSee(route('app.download.latest'));
     }
 
