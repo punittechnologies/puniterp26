@@ -16,6 +16,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class ProductConfigurationController extends Controller
 {
@@ -85,11 +86,29 @@ class ProductConfigurationController extends Controller
             'visible_in_flutter' => ['boolean'],
             'editable_in_flutter' => ['boolean'],
             'printable_on_label' => ['boolean'],
+            'use_as_weight_divisor' => ['boolean'],
             'visible_in_reports' => ['boolean'],
             'searchable' => ['boolean'],
             'filterable' => ['boolean'],
             'sort_order' => ['integer', 'min:0'],
         ]);
+
+        if (($data['use_as_weight_divisor'] ?? false) === true) {
+            $options = collect($data['dropdown_options'] ?? []);
+            $valid = ($data['data_type'] ?? null) === 'dropdown'
+                && $options->isNotEmpty()
+                && $options->every(function (mixed $option): bool {
+                    $value = is_array($option) ? ($option['label'] ?? $option['value'] ?? null) : $option;
+
+                    return is_numeric($value) && (float) $value > 0;
+                });
+
+            if (! $valid) {
+                throw ValidationException::withMessages([
+                    'dropdown_options' => 'Divided-weight fields must be dropdowns containing only positive quantities.',
+                ]);
+            }
+        }
 
         $field = DynamicFieldDefinition::query()->create([...$data, 'tenant_id' => $tenantContext->tenantId(), 'created_by' => $request->user()->id]);
 

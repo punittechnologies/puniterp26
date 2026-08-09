@@ -10,7 +10,7 @@ class AppEdition {
   static const appTitle = qrDiagnostic
       ? 'Punit ERP QR Diagnostic'
       : webManagedLabels
-      ? 'Punit ERP Web Label'
+      ? 'PUNIT ERP'
       : 'Punit ERP';
 
   static const deviceNamePrefix = qrDiagnostic

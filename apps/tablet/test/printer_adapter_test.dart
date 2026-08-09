@@ -132,6 +132,80 @@ void main() {
     expect(tspl, contains('PHK123'));
   });
 
+  test('TSPL divides gross and net by selected detail quantity in kg', () {
+    final tspl = BluetoothThermalPrinterAdapter().debugTspl(
+      const PrintJob(
+        jobId: 'job-divided-weight',
+        template: {
+          'widthMm': 75,
+          'heightMm': 75,
+          'elements': [
+            {
+              'type': 'binding_text',
+              'bindingKey': 'weight.gross_per_piece.bundle_quantity',
+              'decimalPrecision': 5,
+              'prefix': 'Gross/pc: ',
+              'x': 5,
+              'y': 10,
+              'width': 65,
+              'height': 8,
+              'style': {'fontSize': 9},
+            },
+            {
+              'type': 'binding_text',
+              'bindingKey': 'weight.net_per_piece.bundle_quantity',
+              'decimalPrecision': 5,
+              'prefix': 'Net/pc: ',
+              'x': 5,
+              'y': 20,
+              'width': 65,
+              'height': 8,
+              'style': {'fontSize': 9},
+            },
+          ],
+        },
+        data: {
+          'gross_weight': 12.5,
+          'net_weight': 12.0,
+          'dynamic_values': {'bundle_quantity': '50'},
+        },
+      ),
+    );
+
+    expect(tspl, contains('Gross/pc: 0.25000'));
+    expect(tspl, contains('Net/pc: 0.24000'));
+  });
+
+  test('TSPL adds configured physical line gap to multiline text', () {
+    final tspl = BluetoothThermalPrinterAdapter().debugTspl(
+      const PrintJob(
+        jobId: 'job-line-gap',
+        template: {
+          'widthMm': 75,
+          'heightMm': 75,
+          'elements': [
+            {
+              'type': 'binding_text',
+              'bindingKey': 'product.name',
+              'x': 5,
+              'y': 10,
+              'width': 20,
+              'height': 20,
+              'multiline': true,
+              'lineGapMm': 1,
+              'style': {'fontSize': 9},
+            },
+          ],
+        },
+        data: {'product_name': 'ONE TWO THREE FOUR FIVE'},
+      ),
+    );
+
+    // Font 2 is 20 dots high. A 1 mm gap adds 8 dots, so lines are 28 dots apart.
+    expect(tspl, contains('TEXT 40,80,"2",0,1,1,'));
+    expect(tspl, contains('TEXT 40,108,"2",0,1,1,'));
+  });
+
   test('TSPL uses real Font 3 metrics when centering bold text', () {
     final tspl = BluetoothThermalPrinterAdapter().debugTspl(
       const PrintJob(

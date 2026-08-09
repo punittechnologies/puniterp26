@@ -127,11 +127,13 @@ void main() {
       'data_type': 'dropdown',
       'is_required': 0,
       'editable_in_flutter': 1,
+      'use_as_weight_divisor': 1,
       'dropdown_options': '[{"label":"Red","value":"red"}]',
     });
 
     expect(field.options.single['label'], 'Red');
     expect(field.options.single['value'], 'red');
+    expect(field.useAsWeightDivisor, isTrue);
   });
 
   test(

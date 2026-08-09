@@ -122,6 +122,30 @@ class QrVerificationModuleTest extends TestCase
         Storage::disk('local')->assertExists($complaint->photo_path);
     }
 
+    public function test_company_name_can_be_hidden_without_removing_punit_verification_branding(): void
+    {
+        [$tenant, $token] = $this->appUserToken();
+        QrPageSetting::query()->create([
+            'tenant_id' => $tenant->id,
+            'is_enabled' => true,
+            'show_company_name' => false,
+            'company_name' => 'Hidden Manufacturer',
+            'complaints_enabled' => false,
+        ]);
+
+        $created = $this->withToken($token)
+            ->withHeader('X-Tenant-Id', $tenant->id)
+            ->postJson('/api/v1/qr/verifications', $this->printPayload())
+            ->assertCreated();
+        $tokenValue = basename((string) parse_url($created->json('publicUrl'), PHP_URL_PATH));
+
+        $this->get('/verify/'.$tokenValue)
+            ->assertOk()
+            ->assertDontSee('Hidden Manufacturer')
+            ->assertDontSee('Test Manufacturer')
+            ->assertSee('VERIFIED THROUGH PUNIT ERP');
+    }
+
     public function test_public_token_does_not_expose_the_database_identifier(): void
     {
         [$tenant, $token] = $this->appUserToken();

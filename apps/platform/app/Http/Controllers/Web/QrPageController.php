@@ -22,6 +22,7 @@ class QrPageController extends Controller
             ['tenant_id' => $tenantId],
             [
                 'company_name' => $request->user()?->tenant?->name,
+                'show_company_name' => true,
                 'made_in_text' => 'Made in India',
                 'theme' => QrPageSetting::DEFAULT_THEME,
                 'display_fields' => QrPageSetting::DEFAULT_DISPLAY_FIELDS,
@@ -54,6 +55,7 @@ class QrPageController extends Controller
             'email_notifications_enabled' => ['nullable', 'boolean'],
             'company_logo' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:4096'],
             'company_name' => ['nullable', 'string', 'max:255'],
+            'show_company_name' => ['nullable', 'boolean'],
             'gst_number' => ['nullable', 'string', 'max:100'],
             'phone' => ['nullable', 'string', 'max:64'],
             'email' => ['nullable', 'email', 'max:255'],
@@ -81,6 +83,7 @@ class QrPageController extends Controller
             'complaints_enabled' => $request->boolean('complaints_enabled'),
             'email_notifications_enabled' => $request->boolean('email_notifications_enabled'),
             'company_name' => $data['company_name'] ?? null,
+            'show_company_name' => $request->boolean('show_company_name'),
             'gst_number' => $data['gst_number'] ?? null,
             'phone' => $data['phone'] ?? null,
             'email' => $data['email'] ?? null,

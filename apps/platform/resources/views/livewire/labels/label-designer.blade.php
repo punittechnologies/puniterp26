@@ -112,6 +112,15 @@
                     <button type="button" x-on:click="addBinding('weight.net', 'Net weight')">Net</button>
                     <button type="button" x-on:click="addBinding('pieces.quantity', 'Pieces')">Pieces</button>
                 </div>
+                @php $dividedWeightBindings = collect($bindings)->where('type', 'divided_weight'); @endphp
+                @if($dividedWeightBindings->isNotEmpty())
+                    <div class="label-tool-group" style="margin-top:10px">
+                        @foreach($dividedWeightBindings as $binding)
+                            <button type="button" x-on:click="addBinding(@js($binding['key']), @js($binding['label']), { decimalPrecision: 5 })">{{ $binding['label'] }}</button>
+                        @endforeach
+                    </div>
+                    <small>Uses the selected Product Detail quantity. Printing is blocked only when this calculated field is on the template and its quantity is missing or invalid.</small>
+                @endif
             </div>
 
             <div class="label-tool-section">
@@ -360,6 +369,17 @@
                                 <option value="{{ $value }}">{{ $label }}</option>
                             @endforeach
                         </select>
+                    </label>
+                </div>
+
+                <div class="label-format-grid" x-show="!['barcode','qr','image','rectangle','line'].includes(selectedElement?.type)">
+                    <label>
+                        <span>Line gap (mm)</span>
+                        <input type="number" min="0" max="10" step="0.1" x-model.number="selectedElement.lineGapMm" x-on:change="updateSelected('lineGapMm', selectedElement.lineGapMm)">
+                    </label>
+                    <label x-show="selectedElement?.bindingKey?.startsWith('weight.gross_per_piece.') || selectedElement?.bindingKey?.startsWith('weight.net_per_piece.')">
+                        <span>Decimal places</span>
+                        <input type="number" min="0" max="6" step="1" x-model.number="selectedElement.decimalPrecision" x-on:change="updateSelected('decimalPrecision', selectedElement.decimalPrecision)">
                     </label>
                 </div>
 

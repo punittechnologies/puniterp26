@@ -118,12 +118,15 @@ class QrVerificationService
             ];
         }
 
+        $showCompanyName = $setting->show_company_name ?? true;
+        $resolvedCompanyName = $setting->company_name ?: $tenant?->name;
+
         return [
             'company' => [
                 'logo_url' => $setting->company_logo_path
                     ? url(Storage::disk('public')->url($setting->company_logo_path))
                     : null,
-                'name' => $setting->company_name ?: $tenant?->name,
+                'name' => $showCompanyName ? $resolvedCompanyName : null,
                 'gst_number' => $setting->gst_number,
                 'phone' => $setting->phone,
                 'email' => $setting->email,
@@ -135,7 +138,9 @@ class QrVerificationService
             'authenticity' => [
                 'status' => 'authentic',
                 'statement' => $setting->authenticity_statement
-                    ?: 'Original product manufactured by '.($setting->company_name ?: $tenant?->name).'.',
+                    ?: ($showCompanyName && $resolvedCompanyName
+                        ? 'Original product manufactured by '.$resolvedCompanyName.'.'
+                        : 'Original product record verified at the time of labelling.'),
                 'made_in_text' => $setting->made_in_text,
             ],
             'product' => [
@@ -147,6 +152,7 @@ class QrVerificationService
                 'printed_at' => $printedAt->toIso8601String(),
             ],
             'page' => [
+                'show_company_name' => $showCompanyName,
                 'theme' => $setting->resolvedTheme(),
                 'section_order' => $setting->resolvedSectionOrder(),
             ],
