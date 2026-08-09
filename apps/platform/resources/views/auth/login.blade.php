@@ -26,6 +26,10 @@
             <button class="btn primary">Login</button>
         </form>
         <p class="muted auth-foot">New customer? <a href="{{ route('onboarding.start') }}">Complete onboarding with your approved phone number</a>.</p>
+        <a class="auth-app-download" href="{{ route('app.download.latest') }}" download>
+            <span aria-hidden="true">↓</span>
+            <span><strong>Download Latest PUNIT ERP App</strong><small>Android APK · Version 1.1.16</small></span>
+        </a>
     </main>
 </body>
 </html>
