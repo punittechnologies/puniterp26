@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -27,6 +28,7 @@ import '../data/production_repository.dart';
 import '../data/scale_adapters.dart';
 import '../domain/scale_models.dart';
 import '../domain/weighing_logic.dart';
+import 'searchable_selection_field.dart';
 
 class WeighingDashboardScreen extends StatefulWidget {
   const WeighingDashboardScreen({super.key});
@@ -197,6 +199,7 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
   bool refreshing = false;
   bool savingAndPrinting = false;
   bool qrDiagnosticBusy = false;
+  String appVersionLabel = 'Version loading…';
   final Map<String, TextEditingController> fieldControllers = {};
   final Map<String, String> dynamicValues = {};
   final Set<String> _batchAppliedKeys = {};
@@ -369,9 +372,23 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
       conversionCalculator: const UnitConversionCalculator(),
     );
     session = WeighingSession();
+    _loadAppVersion();
     _load();
     _connectScale();
     _loadPrinter();
+  }
+
+  Future<void> _loadAppVersion() async {
+    try {
+      final package = await PackageInfo.fromPlatform();
+      if (!mounted) return;
+      setState(() {
+        appVersionLabel = 'v${package.version} (build ${package.buildNumber})';
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => appVersionLabel = 'v1.1.17 (build 22)');
+    }
   }
 
   @override
@@ -1971,11 +1988,24 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
             icon: const Icon(Icons.arrow_back_rounded),
           ),
           const SizedBox(width: 8),
-          Image.asset(
-            'assets/brand/punit-logo.png',
-            width: 104,
-            height: 42,
-            fit: BoxFit.contain,
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Image.asset(
+                'assets/brand/punit-logo.png',
+                width: 104,
+                height: 34,
+                fit: BoxFit.contain,
+              ),
+              Text(
+                appVersionLabel,
+                style: const TextStyle(
+                  color: Color(0xFF475569),
+                  fontSize: 9,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
           ),
           const Spacer(),
           IconButton(
@@ -2037,11 +2067,24 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
             icon: const Icon(Icons.arrow_back_rounded),
           ),
           const SizedBox(width: 8),
-          Image.asset(
-            'assets/brand/punit-logo.png',
-            width: 104,
-            height: 42,
-            fit: BoxFit.contain,
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Image.asset(
+                'assets/brand/punit-logo.png',
+                width: 94,
+                height: 32,
+                fit: BoxFit.contain,
+              ),
+              Text(
+                appVersionLabel,
+                style: const TextStyle(
+                  color: Color(0xFF475569),
+                  fontSize: 8,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
           ),
           const Spacer(),
           IconButton(
@@ -2390,7 +2433,9 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
           'Product detail fields',
           style: TextStyle(fontWeight: FontWeight.w800),
         ),
-        subtitle: const Text('Used for labels and saved transactions'),
+        subtitle: const Text(
+          'Expand, then tap a dropdown to search and select',
+        ),
         children: fields.map((field) => _dynamicField(field)).toList(),
       ),
     );
@@ -2402,7 +2447,7 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
         .where((product) => product.id == selectedProduct?.id)
         .firstOrNull;
 
-    return _searchableSelectionField<ProductConfig>(
+    return SearchableSelectionField<ProductConfig>(
       key: ValueKey(
         'product-${batchEntryMode ? selectedBatch ?? 'none' : 'non-batch'}-${current?.id ?? 'none'}',
       ),
@@ -2596,7 +2641,7 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
           .toList();
       return Padding(
         padding: const EdgeInsets.only(bottom: 12),
-        child: _searchableSelectionField<String>(
+        child: SearchableSelectionField<String>(
           label: field.required ? '${field.fieldLabel} *' : field.fieldLabel,
           hint: 'Search or select',
           value: _selectedDynamicDropdownValue(field).isEmpty
@@ -2642,131 +2687,6 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
     );
   }
 
-  Widget _searchableSelectionField<T>({
-    Key? key,
-    required String label,
-    required String hint,
-    required T? value,
-    required List<T> options,
-    required String Function(T value) optionLabel,
-    required FutureOr<void> Function(T? value) onChanged,
-    bool enabled = true,
-    bool allowClear = false,
-  }) {
-    return InkWell(
-      key: key,
-      onTap: enabled
-          ? () async {
-              final selected = await _showSearchablePicker<T>(
-                title: label.replaceAll(' *', ''),
-                value: value,
-                options: options,
-                optionLabel: optionLabel,
-                allowClear: allowClear,
-              );
-              if (!mounted || !selected.didChoose) return;
-              await onChanged(selected.value);
-            }
-          : null,
-      child: InputDecorator(
-        decoration: _fieldDecoration().copyWith(labelText: label),
-        isEmpty: value == null,
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                value == null ? hint : optionLabel(value),
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: value == null ? Colors.black54 : Colors.black87,
-                ),
-              ),
-            ),
-            const Icon(Icons.search_rounded),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<_SearchSelection<T>> _showSearchablePicker<T>({
-    required String title,
-    required T? value,
-    required List<T> options,
-    required String Function(T value) optionLabel,
-    required bool allowClear,
-  }) async {
-    var query = '';
-    final result = await showDialog<_SearchSelection<T>>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          final filtered = options
-              .where(
-                (option) => optionLabel(
-                  option,
-                ).toLowerCase().contains(query.toLowerCase()),
-              )
-              .toList();
-          return AlertDialog(
-            title: Text('Select $title'),
-            content: SizedBox(
-              width: 520,
-              height: 440,
-              child: Column(
-                children: [
-                  TextField(
-                    autofocus: true,
-                    decoration: const InputDecoration(
-                      prefixIcon: Icon(Icons.search),
-                      hintText: 'Type to search',
-                      border: OutlineInputBorder(),
-                    ),
-                    onChanged: (text) =>
-                        setDialogState(() => query = text.trim()),
-                  ),
-                  const SizedBox(height: 10),
-                  Expanded(
-                    child: ListView.builder(
-                      itemCount: filtered.length,
-                      itemBuilder: (context, index) {
-                        final option = filtered[index];
-                        final selected = option == value;
-                        return ListTile(
-                          title: Text(optionLabel(option)),
-                          trailing: selected
-                              ? const Icon(Icons.check, color: Colors.blue)
-                              : null,
-                          onTap: () => Navigator.of(
-                            context,
-                          ).pop(_SearchSelection.chosen(option)),
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              if (allowClear)
-                TextButton(
-                  onPressed: () => Navigator.of(
-                    context,
-                  ).pop(_SearchSelection<T>.chosen(null)),
-                  child: const Text('Clear'),
-                ),
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Cancel'),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-    return result ?? _SearchSelection<T>.cancelled();
-  }
-
   String _selectedDynamicDropdownValue(DynamicFieldConfig field) {
     final current = dynamicValues[field.internalKey];
     if (current == null || current.isEmpty) return '';
@@ -2779,17 +2699,6 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
 
     return '';
   }
-}
-
-class _SearchSelection<T> {
-  const _SearchSelection._(this.value, this.didChoose);
-
-  factory _SearchSelection.chosen(T? value) => _SearchSelection._(value, true);
-
-  factory _SearchSelection.cancelled() => const _SearchSelection._(null, false);
-
-  final T? value;
-  final bool didChoose;
 }
 
 class _DeviceBadge extends StatelessWidget {
