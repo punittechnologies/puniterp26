@@ -1326,6 +1326,148 @@ code {
     font-weight: 700;
 }
 
+.auth-app-download,
+.public-app-download {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    width: 100%;
+    margin-top: 18px;
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #155eef, #0ea5e9);
+    color: #fff;
+    text-decoration: none;
+    box-shadow: 0 14px 30px rgba(21, 94, 239, .22);
+    transition: transform .18s ease, box-shadow .18s ease;
+}
+
+.auth-app-download:hover,
+.public-app-download:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 18px 38px rgba(21, 94, 239, .3);
+}
+
+.auth-app-download > span:first-child,
+.public-app-download > span:first-child {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, .18);
+    font-size: 23px;
+    font-weight: 900;
+}
+
+.auth-app-download > span:last-child,
+.public-app-download > span:last-child {
+    display: grid;
+    gap: 2px;
+    text-align: left;
+}
+
+.auth-app-download strong,
+.public-app-download strong {
+    font-size: 14px;
+}
+
+.auth-app-download small,
+.public-app-download small {
+    color: #dbeafe;
+    font-size: 11px;
+}
+
+.public-app-body {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 28px 16px;
+    background:
+        radial-gradient(circle at 12% 10%, rgba(14, 165, 233, .2), transparent 34%),
+        radial-gradient(circle at 88% 90%, rgba(37, 99, 235, .18), transparent 36%),
+        #f6f9ff;
+    font-family: "General Sans", "DM Sans", Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+.public-app-card {
+    width: min(680px, 100%);
+    padding: clamp(26px, 6vw, 54px);
+    border: 1px solid #d9e5f6;
+    border-radius: 28px;
+    background: rgba(255, 255, 255, .96);
+    box-shadow: 0 28px 90px rgba(30, 64, 175, .14);
+    text-align: center;
+}
+
+.public-app-brand {
+    justify-content: center;
+    margin-bottom: 26px;
+}
+
+.public-app-badge {
+    display: inline-flex;
+    padding: 7px 11px;
+    border-radius: 999px;
+    background: #eaf2ff;
+    color: #175cd3;
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+}
+
+.public-app-card h1 {
+    max-width: 590px;
+    margin: 17px auto 12px;
+    color: #10233f;
+    font-size: clamp(30px, 6vw, 46px);
+    line-height: 1.08;
+}
+
+.public-app-card > p {
+    max-width: 570px;
+    margin: 0 auto;
+    color: #5f7189;
+    font-size: 16px;
+    line-height: 1.65;
+}
+
+.public-app-actions {
+    display: grid;
+    gap: 12px;
+    max-width: 480px;
+    margin: 26px auto 0;
+}
+
+.public-app-download {
+    margin-top: 0;
+    padding: 16px 18px;
+}
+
+.public-app-login {
+    display: block;
+    padding: 13px 16px;
+    border: 1px solid #bfd3f0;
+    border-radius: 13px;
+    color: #1849a9;
+    font-weight: 800;
+    text-decoration: none;
+}
+
+.public-app-trust {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px 18px;
+    margin-top: 24px;
+    color: #667085;
+    font-size: 12px;
+    font-weight: 700;
+}
+
 .form-grid.single {
     grid-template-columns: 1fr;
 }
