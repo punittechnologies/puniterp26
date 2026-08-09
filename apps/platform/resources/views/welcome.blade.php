@@ -22,7 +22,7 @@
         <div class="public-app-actions">
             <a class="public-app-download" href="{{ route('app.download.latest') }}" download>
                 <span aria-hidden="true">↓</span>
-                <span><strong>Download Latest PUNIT ERP App</strong><small>Android APK · Version 1.1.16</small></span>
+                <span><strong>Download Latest PUNIT ERP App</strong><small>Android APK · Version {{ config('punit.android_app.version') }} (Build {{ config('punit.android_app.build') }})</small></span>
             </a>
             <a class="public-app-login" href="{{ route('login') }}">Open ERP Login</a>
         </div>
