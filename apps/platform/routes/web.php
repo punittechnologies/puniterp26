@@ -24,7 +24,7 @@ Route::get('/', function () {
     return view('welcome');
 });
 
-Route::get('/downloads/latest', fn () => redirect('/downloads/PUNIT-ERP-v1.1.17-build22.apk'))
+Route::get('/downloads/latest', fn () => redirect('/downloads/PUNIT-ERP-v1.1.18-build23.apk'))
     ->name('app.download.latest');
 
 Route::get('/login', function () {

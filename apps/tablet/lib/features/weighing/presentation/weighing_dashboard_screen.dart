@@ -383,11 +383,14 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
       final package = await PackageInfo.fromPlatform();
       if (!mounted) return;
       setState(() {
-        appVersionLabel = 'v${package.version} (build ${package.buildNumber})';
+        appVersionLabel =
+            'v${package.version} (build ${package.buildNumber}) • ${AppEdition.releaseId}';
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() => appVersionLabel = 'v1.1.17 (build 22)');
+      setState(
+        () => appVersionLabel = 'v1.1.18 (build 23) • ${AppEdition.releaseId}',
+      );
     }
   }
 

@@ -1,6 +1,11 @@
 class AppEdition {
   AppEdition._();
 
+  static const releaseId = String.fromEnvironment(
+    'PUNIT_RELEASE_ID',
+    defaultValue: 'development',
+  );
+
   static const webManagedLabels = bool.fromEnvironment(
     'PUNIT_WEB_LABEL_EDITION',
   );
