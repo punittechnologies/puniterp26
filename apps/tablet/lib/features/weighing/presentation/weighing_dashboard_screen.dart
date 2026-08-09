@@ -389,7 +389,7 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
     } catch (_) {
       if (!mounted) return;
       setState(
-        () => appVersionLabel = 'v1.1.18 (build 23) • ${AppEdition.releaseId}',
+        () => appVersionLabel = 'v1.1.19 (build 24) • ${AppEdition.releaseId}',
       );
     }
   }

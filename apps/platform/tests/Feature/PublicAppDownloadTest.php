@@ -24,6 +24,6 @@ class PublicAppDownloadTest extends TestCase
     public function test_latest_download_route_points_to_production_signed_apk(): void
     {
         $this->get('/downloads/latest')
-            ->assertRedirect('/downloads/PUNIT-ERP-v1.1.18-build23.apk');
+            ->assertRedirect('/downloads/PUNIT-ERP-v1.1.19-build24.apk');
     }
 }

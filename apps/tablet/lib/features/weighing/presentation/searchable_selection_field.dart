@@ -26,47 +26,78 @@ class SearchableSelectionField<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: enabled ? () => _openPicker(context) : null,
-      borderRadius: BorderRadius.circular(4),
-      child: InputDecorator(
-        decoration: InputDecoration(
-          filled: true,
-          fillColor: enabled
-              ? const Color(0xFFF6F9FE)
-              : const Color(0xFFF1F5F9),
-          border: const OutlineInputBorder(),
-          enabledBorder: const OutlineInputBorder(
-            borderSide: BorderSide(color: Color(0xFF9FC5FF), width: 1.4),
+    final displayedValue = value == null ? hint : optionLabel(value as T);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          label,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: Color(0xFF334155),
+            fontWeight: FontWeight.w800,
           ),
-          labelText: label,
-          prefixIcon: const Icon(
-            Icons.search_rounded,
-            color: Color(0xFF0B57D0),
+        ),
+        const SizedBox(height: 6),
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: enabled ? () => _openPicker(context) : null,
+            borderRadius: BorderRadius.circular(6),
+            child: Container(
+              constraints: const BoxConstraints(minHeight: 62),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: enabled
+                    ? const Color(0xFFF6F9FE)
+                    : const Color(0xFFF1F5F9),
+                border: Border.all(
+                  color: enabled
+                      ? const Color(0xFF9FC5FF)
+                      : const Color(0xFFCBD5E1),
+                  width: 1.4,
+                ),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.search_rounded, color: Color(0xFF0B57D0)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      displayedValue,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: value == null
+                            ? const Color(0xFF64748B)
+                            : const Color(0xFF0F172A),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const Icon(Icons.arrow_drop_down_rounded),
+                ],
+              ),
+            ),
           ),
-          suffixIcon: const Icon(Icons.arrow_drop_down_rounded),
-          helperText: enabled
+        ),
+        const SizedBox(height: 5),
+        Text(
+          enabled
               ? 'Tap here to search and select'
               : 'Select the required item first',
-          helperStyle: const TextStyle(
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
             color: Color(0xFF0B57D0),
             fontWeight: FontWeight.w700,
           ),
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 17,
-          ),
         ),
-        isEmpty: value == null,
-        child: Text(
-          value == null ? hint : optionLabel(value as T),
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: value == null ? Colors.black54 : Colors.black87,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ),
+      ],
     );
   }
 
