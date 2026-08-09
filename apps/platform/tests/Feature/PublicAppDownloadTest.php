@@ -8,6 +8,8 @@ class PublicAppDownloadTest extends TestCase
 {
     public function test_public_home_and_login_show_latest_app_download(): void
     {
+        $this->withoutVite();
+
         $this->get('/')
             ->assertOk()
             ->assertSee('Download Latest PUNIT ERP App')
