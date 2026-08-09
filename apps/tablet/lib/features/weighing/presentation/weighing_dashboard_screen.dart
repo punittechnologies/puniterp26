@@ -1232,6 +1232,7 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
     if (savingAndPrinting) return;
     setState(() => savingAndPrinting = true);
     try {
+      if (!await _validateDividedWeightTemplate()) return;
       final saved = await _capture(syncAfterSave: false);
       if (saved == null) return;
       await _printLabel(saved);
@@ -1239,6 +1240,46 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
     } finally {
       if (mounted) setState(() => savingAndPrinting = false);
     }
+  }
+
+  Future<bool> _validateDividedWeightTemplate() async {
+    final product = selectedProduct;
+    if (product == null) return true;
+    try {
+      await labelRepository.sync();
+    } catch (_) {
+      // Offline printing may continue with the last successfully synced template.
+    }
+    final activeTemplate = await labelRepository.effective(
+      productId: product.id,
+      variantId: null,
+      preferServerTemplates: true,
+    );
+    final elements = activeTemplate?.templateJson['elements'];
+    if (elements is! List) return true;
+
+    for (final element in elements.whereType<Map>()) {
+      final key = element['bindingKey']?.toString() ?? '';
+      if (!key.startsWith('weight.gross_per_piece.') &&
+          !key.startsWith('weight.net_per_piece.')) {
+        continue;
+      }
+      final internalKey = key.split('.').last;
+      final raw = dynamicValues[internalKey]?.trim() ?? '';
+      final divisor = num.tryParse(raw);
+      if (divisor == null || divisor <= 0) {
+        final field = fields
+            .where((candidate) => candidate.internalKey == internalKey)
+            .firstOrNull;
+        _showCornerMessage(
+          'Print stopped: select a valid ${field?.fieldLabel ?? internalKey} quantity for divided weight.',
+          error: true,
+        );
+        return false;
+      }
+    }
+    labelTemplate = activeTemplate;
+    return true;
   }
 
   Future<void> _showQrDiagnosticPicker() async {
@@ -1484,6 +1525,8 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
             'piece_quantity': saved.pieceQuantity,
             'dynamic_values': Map<String, dynamic>.from(dynamicValues),
             'product_raw': product.raw,
+            '_active_template_elements':
+                activeTemplate?.templateJson['elements'] ?? const [],
           },
         ),
       );
@@ -2359,26 +2402,17 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
         .where((product) => product.id == selectedProduct?.id)
         .firstOrNull;
 
-    return DropdownButtonFormField<ProductConfig>(
+    return _searchableSelectionField<ProductConfig>(
       key: ValueKey(
         'product-${batchEntryMode ? selectedBatch ?? 'none' : 'non-batch'}-${current?.id ?? 'none'}',
       ),
-      initialValue: current,
-      isExpanded: true,
-      decoration: _fieldDecoration().copyWith(
-        labelText: batchEntryMode ? 'Batch product' : 'Product',
-        hintText: batchEntryMode && selectedBatch == null
-            ? 'Select batch first'
-            : 'Select product',
-      ),
-      items: visibleProducts
-          .map(
-            (product) => DropdownMenuItem(
-              value: product,
-              child: Text(product.name, overflow: TextOverflow.ellipsis),
-            ),
-          )
-          .toList(),
+      label: batchEntryMode ? 'Batch product' : 'Product',
+      hint: batchEntryMode && selectedBatch == null
+          ? 'Select batch first'
+          : 'Select product',
+      value: current,
+      options: visibleProducts,
+      optionLabel: (product) => product.name,
       onChanged: (product) async {
         setState(() {
           selectedProduct = product;
@@ -2556,37 +2590,29 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
 
   Widget _dynamicField(DynamicFieldConfig field) {
     if (field.options.isNotEmpty || field.dataType == 'dropdown') {
+      final options = field.options
+          .map((option) => '${option['label'] ?? option['value']}')
+          .where((value) => value.trim().isNotEmpty)
+          .toList();
       return Padding(
         padding: const EdgeInsets.only(bottom: 12),
-        child: DropdownButtonFormField<String>(
-          decoration: InputDecoration(
-            labelText: field.required
-                ? '${field.fieldLabel} *'
-                : field.fieldLabel,
-            border: const OutlineInputBorder(),
-          ),
-          initialValue: _selectedDynamicDropdownValue(field),
-          items: [
-            const DropdownMenuItem(
-              value: '',
-              child: Text('None / leave blank'),
-            ),
-            ...field.options.map(
-              (option) => DropdownMenuItem(
-                value: '${option['label'] ?? option['value']}',
-                child: Text('${option['label'] ?? option['value']}'),
-              ),
-            ),
-          ],
-          onChanged: field.editable
-              ? (value) => setState(() {
-                  if (value == null || value.isEmpty) {
-                    dynamicValues.remove(field.internalKey);
-                  } else {
-                    dynamicValues[field.internalKey] = value;
-                  }
-                })
-              : null,
+        child: _searchableSelectionField<String>(
+          label: field.required ? '${field.fieldLabel} *' : field.fieldLabel,
+          hint: 'Search or select',
+          value: _selectedDynamicDropdownValue(field).isEmpty
+              ? null
+              : _selectedDynamicDropdownValue(field),
+          options: options,
+          optionLabel: (value) => value,
+          enabled: field.editable,
+          allowClear: true,
+          onChanged: (value) => setState(() {
+            if (value == null || value.isEmpty) {
+              dynamicValues.remove(field.internalKey);
+            } else {
+              dynamicValues[field.internalKey] = value;
+            }
+          }),
         ),
       );
     }
@@ -2616,6 +2642,131 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
     );
   }
 
+  Widget _searchableSelectionField<T>({
+    Key? key,
+    required String label,
+    required String hint,
+    required T? value,
+    required List<T> options,
+    required String Function(T value) optionLabel,
+    required FutureOr<void> Function(T? value) onChanged,
+    bool enabled = true,
+    bool allowClear = false,
+  }) {
+    return InkWell(
+      key: key,
+      onTap: enabled
+          ? () async {
+              final selected = await _showSearchablePicker<T>(
+                title: label.replaceAll(' *', ''),
+                value: value,
+                options: options,
+                optionLabel: optionLabel,
+                allowClear: allowClear,
+              );
+              if (!mounted || !selected.didChoose) return;
+              await onChanged(selected.value);
+            }
+          : null,
+      child: InputDecorator(
+        decoration: _fieldDecoration().copyWith(labelText: label),
+        isEmpty: value == null,
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                value == null ? hint : optionLabel(value),
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: value == null ? Colors.black54 : Colors.black87,
+                ),
+              ),
+            ),
+            const Icon(Icons.search_rounded),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<_SearchSelection<T>> _showSearchablePicker<T>({
+    required String title,
+    required T? value,
+    required List<T> options,
+    required String Function(T value) optionLabel,
+    required bool allowClear,
+  }) async {
+    var query = '';
+    final result = await showDialog<_SearchSelection<T>>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final filtered = options
+              .where(
+                (option) => optionLabel(
+                  option,
+                ).toLowerCase().contains(query.toLowerCase()),
+              )
+              .toList();
+          return AlertDialog(
+            title: Text('Select $title'),
+            content: SizedBox(
+              width: 520,
+              height: 440,
+              child: Column(
+                children: [
+                  TextField(
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.search),
+                      hintText: 'Type to search',
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (text) =>
+                        setDialogState(() => query = text.trim()),
+                  ),
+                  const SizedBox(height: 10),
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: filtered.length,
+                      itemBuilder: (context, index) {
+                        final option = filtered[index];
+                        final selected = option == value;
+                        return ListTile(
+                          title: Text(optionLabel(option)),
+                          trailing: selected
+                              ? const Icon(Icons.check, color: Colors.blue)
+                              : null,
+                          onTap: () => Navigator.of(
+                            context,
+                          ).pop(_SearchSelection.chosen(option)),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              if (allowClear)
+                TextButton(
+                  onPressed: () => Navigator.of(
+                    context,
+                  ).pop(_SearchSelection<T>.chosen(null)),
+                  child: const Text('Clear'),
+                ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    return result ?? _SearchSelection<T>.cancelled();
+  }
+
   String _selectedDynamicDropdownValue(DynamicFieldConfig field) {
     final current = dynamicValues[field.internalKey];
     if (current == null || current.isEmpty) return '';
@@ -2628,6 +2779,17 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
 
     return '';
   }
+}
+
+class _SearchSelection<T> {
+  const _SearchSelection._(this.value, this.didChoose);
+
+  factory _SearchSelection.chosen(T? value) => _SearchSelection._(value, true);
+
+  factory _SearchSelection.cancelled() => const _SearchSelection._(null, false);
+
+  final T? value;
+  final bool didChoose;
 }
 
 class _DeviceBadge extends StatelessWidget {

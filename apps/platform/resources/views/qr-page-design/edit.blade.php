@@ -52,6 +52,11 @@
             <section class="qr-card">
                 <h3>Company identity</h3>
                 <p>These details are copied into every new verification snapshot. Editing them later will not rewrite labels already printed.</p>
+                <div class="qr-switch-row" style="margin-bottom:14px">
+                    <div><strong>Show company name</strong><small>Turn this off to hide the customer company name from newly created QR verification pages.</small></div>
+                    <input type="hidden" name="show_company_name" value="0">
+                    <input type="checkbox" name="show_company_name" value="1" @checked(old('show_company_name', $setting->show_company_name ?? true))>
+                </div>
                 <div class="qr-form-grid">
                     <label class="qr-field wide"><span>Company logo</span><input type="file" name="company_logo" accept="image/png,image/jpeg,image/webp"></label>
                     @if($logoUrl)<div class="wide"><img class="qr-logo-current" src="{{ $logoUrl }}" alt="Current company logo"></div>@endif
@@ -118,7 +123,9 @@
                 <div class="qr-preview__top">
                     @if($logoUrl)<img class="qr-preview__logo" src="{{ $logoUrl }}" alt="">@endif
                     <small>PRODUCT AUTHENTICITY</small>
-                    <h3 style="color:#fff;margin-top:8px">{{ old('company_name', $setting->company_name ?: auth()->user()?->tenant?->name) }}</h3>
+                    @if(old('show_company_name', $setting->show_company_name ?? true))
+                        <h3 style="color:#fff;margin-top:8px">{{ old('company_name', $setting->company_name ?: auth()->user()?->tenant?->name) }}</h3>
+                    @endif
                 </div>
                 <div class="qr-preview__body">
                     <div class="qr-preview__verified">

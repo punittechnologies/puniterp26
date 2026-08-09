@@ -51,7 +51,7 @@ android {
         create("webLabel") {
             dimension = "edition"
             applicationId = "com.punittechnologies.puniterp.weblabel"
-            manifestPlaceholders["appLabel"] = "Punit ERP Web Label"
+            manifestPlaceholders["appLabel"] = "PUNIT ERP"
             signingConfig = signingConfigs.getByName("webLabelRelease")
         }
         create("qrDiagnostic") {

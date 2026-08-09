@@ -139,6 +139,7 @@ class DynamicFieldConfig {
     required this.dataType,
     required this.required,
     required this.editable,
+    required this.useAsWeightDivisor,
     required this.options,
   });
 
@@ -151,6 +152,7 @@ class DynamicFieldConfig {
       dataType: json['data_type'] as String,
       required: _asBool(json['is_required']),
       editable: _asBool(json['editable_in_flutter'], fallback: true),
+      useAsWeightDivisor: _asBool(json['use_as_weight_divisor']),
       options: _options(json['dropdown_options']),
     );
   }
@@ -162,6 +164,7 @@ class DynamicFieldConfig {
   final String dataType;
   final bool required;
   final bool editable;
+  final bool useAsWeightDivisor;
   final List<Map<String, dynamic>> options;
 }
 

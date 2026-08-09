@@ -2,9 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Domain\Labels\Services\LabelBindingRegistry;
 use App\Domain\Labels\Services\LabelTemplateService;
 use App\Livewire\Labels\LabelDesigner;
 use App\Models\Permission;
+use App\Models\ProductConfiguration\DynamicFieldDefinition;
 use App\Models\ProductConfiguration\Product;
 use App\Models\ProductConfiguration\ProductVariant;
 use App\Models\Role;
@@ -228,6 +230,28 @@ class PhaseThreeLabelTemplateTest extends TestCase
             'Keep this content',
             $existing->fresh()->template_json['elements'][0]['text'],
         );
+    }
+
+    public function test_divided_weight_bindings_are_additive_and_tied_to_enabled_detail_field(): void
+    {
+        $tenant = Tenant::query()->create(['name' => 'Tenant', 'code' => 'DIVIDED', 'status' => 'active']);
+        DynamicFieldDefinition::query()->create([
+            'tenant_id' => $tenant->id,
+            'field_label' => 'Bundle quantity',
+            'internal_key' => 'bundle_quantity',
+            'entity_type' => 'product_variant',
+            'data_type' => 'dropdown',
+            'dropdown_options' => [['label' => '50', 'value' => '50']],
+            'visible_in_flutter' => true,
+            'use_as_weight_divisor' => true,
+            'is_active' => true,
+        ]);
+
+        $keys = collect(app(LabelBindingRegistry::class)->bindings($tenant->id))->pluck('key');
+
+        $this->assertTrue($keys->contains('weight.gross_per_piece.bundle_quantity'));
+        $this->assertTrue($keys->contains('weight.net_per_piece.bundle_quantity'));
+        $this->assertTrue($keys->contains('weight.gross'));
     }
 
     private function tenantToken(): array

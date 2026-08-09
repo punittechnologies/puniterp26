@@ -1108,7 +1108,9 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
           true,
         );
         final wrappedLines = _wrapPrinterText(text, charactersPerLine);
-        final lineHeightDots = _fontHeightDots(font) * multiplier;
+        final lineGapDots = _dots(element['lineGapMm']).clamp(0, 80);
+        final lineHeightDots =
+            (_fontHeightDots(font) * multiplier) + lineGapDots;
         final maxLines = (_dots(element['height']) ~/ lineHeightDots).clamp(
           1,
           20,
@@ -1390,6 +1392,12 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
 
   String _bindingValue(String? key, Map<String, dynamic> data) {
     final unit = _clean(data['unit']).ifEmpty('kg');
+    if (key?.startsWith('weight.gross_per_piece.') == true) {
+      return _dividedWeightValue(key!, data['gross_weight'], data);
+    }
+    if (key?.startsWith('weight.net_per_piece.') == true) {
+      return _dividedWeightValue(key!, data['net_weight'], data);
+    }
     return switch (key) {
       'company.name' => _clean(data['company_name']).ifEmpty('PUNIT ERP'),
       'product.name' => _clean(data['product_name']),
@@ -1414,6 +1422,29 @@ class BluetoothThermalPrinterAdapter implements PrinterAdapter {
       _ when key?.startsWith('dynamic.') == true => _dynamicValue(key!, data),
       _ => key == null ? '' : _clean(data[key]).ifEmpty(unit == '' ? '' : ''),
     };
+  }
+
+  String _dividedWeightValue(
+    String key,
+    Object? weight,
+    Map<String, dynamic> data,
+  ) {
+    final numerator = num.tryParse(weight?.toString() ?? '');
+    final divisor = num.tryParse(_dynamicValue(key.split('.').last, data));
+    if (numerator == null || divisor == null || divisor <= 0) return '';
+    final elements = data['_active_template_elements'];
+    var precision = 5;
+    if (elements is List) {
+      final match = elements
+          .whereType<Map>()
+          .where((element) => element['bindingKey']?.toString() == key)
+          .firstOrNull;
+      final configured = int.tryParse(
+        match?['decimalPrecision']?.toString() ?? '',
+      );
+      if (configured != null) precision = configured.clamp(0, 6);
+    }
+    return (numerator / divisor).toStringAsFixed(precision);
   }
 
   String _dynamicValue(String key, Map<String, dynamic> data) {

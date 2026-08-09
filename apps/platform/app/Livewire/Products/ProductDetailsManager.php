@@ -15,6 +15,8 @@ class ProductDetailsManager extends Component
 
     public bool $newPrintableOnLabel = true;
 
+    public bool $newUseAsWeightDivisor = false;
+
     public array $fieldNames = [];
 
     public array $optionInputs = [];
@@ -25,17 +27,26 @@ class ProductDetailsManager extends Component
             'newFieldName' => ['required', 'string', 'max:255'],
             'newFieldValues' => ['nullable', 'string', 'max:5000'],
             'newPrintableOnLabel' => ['boolean'],
+            'newUseAsWeightDivisor' => ['boolean'],
         ]);
+
+        if ($data['newUseAsWeightDivisor'] && ! $this->combinedOptionsArePositiveQuantities($data['newFieldName'], $data['newFieldValues'])) {
+            $this->addError('newFieldValues', 'Divided-weight fields must contain only positive quantities, for example 25, 50, 100.');
+
+            return;
+        }
 
         $created = $this->saveFieldWithOptions(
             $data['newFieldName'],
             $data['newFieldValues'],
             (bool) $data['newPrintableOnLabel'],
+            (bool) $data['newUseAsWeightDivisor'],
         );
 
         $this->newFieldName = '';
         $this->newFieldValues = '';
         $this->newPrintableOnLabel = true;
+        $this->newUseAsWeightDivisor = false;
         session()->flash('status', $created ? 'Product detail field and values saved.' : 'Existing field found, values merged.');
     }
 
@@ -62,6 +73,12 @@ class ProductDetailsManager extends Component
         $value = trim((string) ($this->optionInputs[$fieldId] ?? ''));
 
         if ($value === '') {
+            return;
+        }
+
+        if ($field->use_as_weight_divisor && ! $this->isPositiveQuantity($value)) {
+            $this->addError('optionInputs.'.$fieldId, 'Enter a positive quantity for divided weight.');
+
             return;
         }
 
@@ -99,6 +116,23 @@ class ProductDetailsManager extends Component
         $field = $this->field($fieldId);
         $field->update([
             'printable_on_label' => ! $field->printable_on_label,
+            'updated_by' => Auth::id(),
+        ]);
+    }
+
+    public function toggleWeightDivisor(string $fieldId): void
+    {
+        $field = $this->field($fieldId);
+        $next = ! $field->use_as_weight_divisor;
+
+        if ($next && ! $this->optionsArePositiveQuantities($field->dropdown_options ?? [])) {
+            $this->addError('optionInputs.'.$fieldId, 'All existing options must be positive quantities before enabling divided weight.');
+
+            return;
+        }
+
+        $field->update([
+            'use_as_weight_divisor' => $next,
             'updated_by' => Auth::id(),
         ]);
     }
@@ -167,7 +201,7 @@ class ProductDetailsManager extends Component
         return preg_match('/^[a-z]/', $base) ? $base : 'detail_'.$base;
     }
 
-    private function saveFieldWithOptions(string $name, string $values, bool $printableOnLabel): bool
+    private function saveFieldWithOptions(string $name, string $values, bool $printableOnLabel, bool $useAsWeightDivisor): bool
     {
         $name = trim($name);
         if ($name === '') {
@@ -197,6 +231,7 @@ class ProductDetailsManager extends Component
                 'data_type' => 'dropdown',
                 'dropdown_options' => $mergedOptions,
                 'printable_on_label' => $printableOnLabel,
+                'use_as_weight_divisor' => $useAsWeightDivisor,
                 'is_active' => true,
                 'updated_by' => Auth::id(),
             ]);
@@ -216,6 +251,7 @@ class ProductDetailsManager extends Component
             'visible_in_flutter' => true,
             'editable_in_flutter' => true,
             'printable_on_label' => $printableOnLabel,
+            'use_as_weight_divisor' => $useAsWeightDivisor,
             'visible_in_reports' => true,
             'is_active' => true,
             'created_by' => Auth::id(),
@@ -237,6 +273,33 @@ class ProductDetailsManager extends Component
                 'value' => Str::of($option)->slug('_')->toString(),
             ])
             ->all();
+    }
+
+    private function combinedOptionsArePositiveQuantities(string $name, string $values): bool
+    {
+        $existing = DynamicFieldDefinition::withTrashed()
+            ->where('tenant_id', $this->tenantId())
+            ->where('entity_type', 'product_variant')
+            ->where('internal_key', $this->baseInternalKey($name))
+            ->first();
+        $options = collect($existing?->dropdown_options ?? [])
+            ->merge($this->optionsFromText($values))
+            ->values()
+            ->all();
+
+        return $this->optionsArePositiveQuantities($options);
+    }
+
+    private function optionsArePositiveQuantities(array $options): bool
+    {
+        return $options !== [] && collect($options)->every(
+            fn (array $option): bool => $this->isPositiveQuantity((string) ($option['label'] ?? $option['value'] ?? '')),
+        );
+    }
+
+    private function isPositiveQuantity(string $value): bool
+    {
+        return is_numeric(trim($value)) && (float) trim($value) > 0;
     }
 
     private function tenantId(): string

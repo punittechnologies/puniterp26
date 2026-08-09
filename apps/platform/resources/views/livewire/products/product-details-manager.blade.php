@@ -18,6 +18,11 @@
                 <input type="checkbox" wire:model="newPrintableOnLabel">
                 Print this field on label
             </label>
+            <label class="inline-check print-check">
+                <input type="checkbox" wire:model="newUseAsWeightDivisor">
+                Use this field as quantity for divided weight
+            </label>
+            @error('newFieldValues') <small class="error">{{ $message }}</small> @enderror
             <button class="btn primary">Save Field & Values</button>
         </form>
     </div>
@@ -41,6 +46,10 @@
                         Label: {{ $field->printable_on_label ? 'Yes' : 'No' }}
                         <button wire:click="togglePrintable('{{ $field->id }}')" type="button">{{ $field->printable_on_label ? '×' : '+' }}</button>
                     </span>
+                    <span class="print-chip">
+                        Divided weight: {{ $field->use_as_weight_divisor ? 'Yes' : 'No' }}
+                        <button wire:click="toggleWeightDivisor('{{ $field->id }}')" type="button">{{ $field->use_as_weight_divisor ? '×' : '+' }}</button>
+                    </span>
                     @forelse (($field->dropdown_options ?? []) as $option)
                         <span wire:key="detail-field-option-{{ $field->id }}-{{ $option['value'] ?? md5($option['label'] ?? '') }}">{{ $option['label'] ?? $option['value'] ?? '' }}
                             <button wire:click="removeOption('{{ $field->id }}', '{{ $option['value'] ?? '' }}')" type="button">×</button>
@@ -49,6 +58,10 @@
                         <p class="empty">No options yet.</p>
                     @endforelse
                 </div>
+                @error('optionInputs.'.$field->id) <small class="error">{{ $message }}</small> @enderror
+                @if($field->use_as_weight_divisor)
+                    <p class="empty">This dropdown supplies the bundle quantity. Labels can print Gross ÷ quantity or Net ÷ quantity in kg.</p>
+                @endif
             </article>
         @empty
             <div class="card empty">No product detail fields yet. Add MTR, SIZE, QUALITY, COLOR, PACKING or any field you need.</div>

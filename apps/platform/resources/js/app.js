@@ -225,7 +225,7 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
                     align: element.style?.align || 'left',
                     fill: analysis.overflow ? '#b91c1c' : '#0f172a',
                     padding: 0,
-                    lineHeight: 1,
+                    lineHeight: analysis.lineHeightRatio,
                     verticalAlign: 'top',
                     wrap: 'none',
                     ellipsis: false,
@@ -260,6 +260,10 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
             }
             if (this.selectedElement && !['barcode', 'qr', 'image', 'rectangle', 'line'].includes(this.selectedElement.type)) {
                 this.selectedElement.multiline ??= Boolean(this.templateJson.precision203);
+                this.selectedElement.lineGapMm ??= 0;
+                if (this.selectedElement.bindingKey?.startsWith('weight.gross_per_piece.') || this.selectedElement.bindingKey?.startsWith('weight.net_per_piece.')) {
+                    this.selectedElement.decimalPrecision ??= 5;
+                }
             }
             this.selectedElement.locked ??= false;
             const canResize = this.selectedElement?.locked !== true;
@@ -329,7 +333,7 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
         addText() {
             this.addElement({ type: 'text', text: 'Static text' });
         },
-        addBinding(bindingKey, label = null) {
+        addBinding(bindingKey, label = null, options = {}) {
             this.addElement({
                 type: 'binding_text',
                 bindingKey,
@@ -337,6 +341,7 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
                 previewValue: this.previewValueForBinding(bindingKey, label),
                 width: 42,
                 height: 8,
+                ...options,
             });
         },
         addBarcode() {
@@ -387,6 +392,7 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
                 multiline: true,
                 locked: false,
                 preserveAspectRatio: true,
+                lineGapMm: 0,
                 style: { fontSize: 10, prefixFontSize: 10, suffixFontSize: 10, fontFamily: 'TVS Auto', fontWeight: '600', align: 'left' },
                 ...partial,
             };
@@ -611,9 +617,11 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
             const spec = this.printerFontSpec(element, fontSizeOverride);
             const widthDots = Math.max(1, Math.round(Number(element?.width || 1) * 8));
             const heightDots = Math.max(1, Math.round(Number(element?.height || 1) * 8));
+            const lineGapDots = Math.max(0, Math.round(Number(element?.lineGapMm || 0) * 8));
+            const lineHeightDots = spec.characterHeightDots + lineGapDots;
             const charsPerLine = Math.max(1, Math.floor(widthDots / spec.characterWidthDots));
             const multiline = element?.multiline === true;
-            const maxLines = multiline ? Math.max(1, Math.floor(heightDots / spec.characterHeightDots)) : 1;
+            const maxLines = multiline ? Math.max(1, Math.floor(heightDots / lineHeightDots)) : 1;
             const lines = this.wrapPrinterText(this.displayText(element), charsPerLine, multiline);
             const overflow = lines.length > maxLines || (!multiline && lines[0].length > charsPerLine);
             let suggestedFontSize = spec.fontSize;
@@ -633,8 +641,11 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
                 overflow,
                 charsPerLine,
                 maxLines,
+                lineGapDots,
+                lineHeightDots,
+                lineHeightRatio: lineHeightDots / spec.characterHeightDots,
                 suggestedFontSize,
-                summary: `Chosen ${spec.fontSize} → TVS font ${spec.font}, ${spec.characterWidthDots}×${spec.characterHeightDots} dots, ${charsPerLine} characters × ${maxLines} line${maxLines === 1 ? '' : 's'}.`,
+                summary: `Chosen ${spec.fontSize} → TVS font ${spec.font}, ${spec.characterWidthDots}×${spec.characterHeightDots} dots, ${lineGapDots} dot line gap, ${charsPerLine} characters × ${maxLines} line${maxLines === 1 ? '' : 's'}.`,
             };
         },
         selectedTextAnalysis() {
@@ -675,6 +686,8 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
                 'barcode.value': 'PHK123456',
                 'product.customer_barcode': 'CUSTOMER123',
             };
+            if (bindingKey?.startsWith('weight.gross_per_piece.')) return '0.30500';
+            if (bindingKey?.startsWith('weight.net_per_piece.')) return '0.29700';
             if (examples[bindingKey]) return examples[bindingKey];
             const cleanLabel = String(label || bindingKey || 'Value')
                 .replace(/^dynamic\.product_variant\./, '')
@@ -723,8 +736,10 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
                 const key = path.replace('style.', '');
                 element.style = { ...(element.style || {}), [key]: value };
             } else {
-                element[path] = ['x', 'y', 'width', 'height', 'rotation', 'layerOrder'].includes(path) ? Number(value) : value;
+                element[path] = ['x', 'y', 'width', 'height', 'rotation', 'layerOrder', 'lineGapMm', 'decimalPrecision'].includes(path) ? Number(value) : value;
             }
+            if (path === 'lineGapMm') element.lineGapMm = Math.min(10, Math.max(0, Number(element.lineGapMm || 0)));
+            if (path === 'decimalPrecision') element.decimalPrecision = Math.min(6, Math.max(0, Math.round(Number(element.decimalPrecision ?? 5))));
             if (['x', 'y', 'width', 'height'].includes(path)) {
                 const grid = Number(this.templateJson.gridMm || (this.templateJson.precision203 ? 0.125 : 1));
                 element[path] = this.snap(Number(element[path] || 0), grid);

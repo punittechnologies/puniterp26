@@ -519,15 +519,20 @@ class LabelDesigner extends Component
 
     public function updateSelected(string $field, mixed $value): void
     {
-        $allowed = ['x', 'y', 'width', 'height', 'rotation', 'layerOrder', 'text', 'bindingKey', 'prefix', 'suffix', 'caption', 'captionPosition', 'showValue', 'fontSize', 'fontFamily', 'fontWeight', 'fontStyle', 'align'];
+        $allowed = ['x', 'y', 'width', 'height', 'rotation', 'layerOrder', 'lineGapMm', 'decimalPrecision', 'text', 'bindingKey', 'prefix', 'suffix', 'caption', 'captionPosition', 'showValue', 'fontSize', 'fontFamily', 'fontWeight', 'fontStyle', 'align'];
 
         if (! in_array($field, $allowed, true)) {
             return;
         }
 
         $this->mutateSelected(function (array $element) use ($field, $value): array {
-            if (in_array($field, ['x', 'y', 'width', 'height', 'rotation'], true)) {
+            if (in_array($field, ['x', 'y', 'width', 'height', 'rotation', 'lineGapMm'], true)) {
                 $element[$field] = $field === 'rotation' ? (float) $value : $this->snap((float) $value);
+                if ($field === 'lineGapMm') {
+                    $element[$field] = min(10, max(0, (float) $value));
+                }
+            } elseif ($field === 'decimalPrecision') {
+                $element[$field] = min(6, max(0, (int) $value));
             } elseif ($field === 'layerOrder') {
                 $element[$field] = max(1, (int) $value);
             } elseif (in_array($field, ['fontSize', 'fontFamily', 'fontWeight', 'fontStyle', 'align'], true)) {

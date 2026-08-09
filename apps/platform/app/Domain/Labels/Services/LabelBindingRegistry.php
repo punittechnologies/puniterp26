@@ -43,7 +43,28 @@ class LabelBindingRegistry
             ])
             ->all();
 
-        return [...$static, ...$dynamic];
+        $dividedWeights = DynamicFieldDefinition::query()
+            ->where('tenant_id', $tenantId)
+            ->where('is_active', true)
+            ->where('use_as_weight_divisor', true)
+            ->orderBy('sort_order')
+            ->get()
+            ->flatMap(fn ($field) => [
+                [
+                    'key' => 'weight.gross_per_piece.'.$field->internal_key,
+                    'label' => 'Gross per piece ('.$field->field_label.')',
+                    'type' => 'divided_weight',
+                ],
+                [
+                    'key' => 'weight.net_per_piece.'.$field->internal_key,
+                    'label' => 'Net per piece ('.$field->field_label.')',
+                    'type' => 'divided_weight',
+                ],
+            ])
+            ->values()
+            ->all();
+
+        return [...$static, ...$dividedWeights, ...$dynamic];
     }
 
     public function keys(string $tenantId): array

@@ -117,6 +117,12 @@ class LabelTemplateValidator
                 "template_json.elements.{$index}.bindingKey" => 'Unsupported barcode data source.',
             ]);
         }
+
+        if (isset($element['lineGapMm']) && (! is_numeric($element['lineGapMm']) || (float) $element['lineGapMm'] < 0 || (float) $element['lineGapMm'] > 10)) {
+            throw ValidationException::withMessages([
+                "template_json.elements.{$index}.lineGapMm" => 'Line gap must be between 0 and 10 mm.',
+            ]);
+        }
     }
 
     private function overlaps(array $a, array $b): bool
