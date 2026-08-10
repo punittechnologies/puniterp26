@@ -23,6 +23,7 @@ class ProductionRepository {
     required ScaleReading reading,
     Map<String, dynamic> dynamicValues = const {},
     LocalInwardSession? inwardSession,
+    String? labelSerialNumber,
   }) async {
     final accountScope = await ApiSession.accountScope();
     final now = DateTime.now();
@@ -46,6 +47,7 @@ class ProductionRepository {
               id: id,
               accountScope: Value(accountScope),
               serialNumber: serial,
+              labelSerialNumber: Value(labelSerialNumber),
               barcodeValue: barcode,
               productId: product.id,
               variantId: Value(variant?.id),
@@ -73,6 +75,7 @@ class ProductionRepository {
               productId: product.id,
               variantId: Value(variant?.id),
               serialNumber: Value(serial),
+              labelSerialNumber: Value(labelSerialNumber),
               barcodeValue: Value(barcode),
               transactionType: 'production_addition',
               weightQuantity: computation.net,
@@ -96,6 +99,7 @@ class ProductionRepository {
               payloadJson: jsonEncode({
                 'id': id,
                 'serial_number': serial,
+                'label_serial_number': labelSerialNumber,
                 'barcode_value': barcode,
                 'product_id': product.id,
                 'variant_id': variant?.id,

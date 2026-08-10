@@ -100,6 +100,7 @@ class OperationsSyncService
                     'variant_id' => $payload['variant_id'] ?? null,
                     'inward_session_id' => $session?->id,
                     'serial_number' => $payload['serial_number'],
+                    'label_serial_number' => $payload['label_serial_number'] ?? null,
                     'barcode_value' => $payload['barcode_value'],
                     'product_snapshot' => $payload['product_snapshot'] ?? [],
                     'dynamic_values' => $payload['dynamic_values'] ?? [],
@@ -123,6 +124,7 @@ class OperationsSyncService
                     'tenant_id' => $tenantId,
                     'production_transaction_id' => $transaction->id,
                     'serial_number' => $transaction->serial_number,
+                    'label_serial_number' => $transaction->label_serial_number,
                     'barcode_value' => $transaction->barcode_value,
                     'inventory_status' => 'available',
                     'dispatch_status' => 'not_dispatched',
@@ -134,6 +136,7 @@ class OperationsSyncService
                     'product_id' => $transaction->product_id,
                     'variant_id' => $transaction->variant_id,
                     'serial_number' => $transaction->serial_number,
+                    'label_serial_number' => $transaction->label_serial_number,
                     'barcode_value' => $transaction->barcode_value,
                     'transaction_type' => 'production_addition',
                     'weight_quantity' => $transaction->net_weight,
@@ -434,7 +437,8 @@ class OperationsSyncService
 
         return [
             'id' => $production->id,
-            'serial_number' => $production->serial_number,
+            'serial_number' => $production->label_serial_number,
+            'label_serial_number' => $production->label_serial_number,
             'barcode_value' => $production->barcode_value,
             'product_id' => $production->product_id,
             'variant_id' => $production->variant_id,
@@ -457,7 +461,10 @@ class OperationsSyncService
             ->where('tenant_id', $tenantId)
             ->where(function ($query) use ($barcode): void {
                 $query->where('barcode_value', $barcode)
-                    ->orWhere('serial_number', $barcode);
+                    ->orWhere('label_serial_number', $barcode)
+                    ->orWhere(fn ($fallback) => $fallback
+                        ->whereNull('label_serial_number')
+                        ->where('serial_number', $barcode));
             });
 
         if ($lock) {
@@ -471,7 +478,10 @@ class OperationsSyncService
                 ->where('tenant_id', $tenantId)
                 ->where(function ($query) use ($barcode): void {
                     $query->where('barcode_value', 'like', $barcode.'%')
-                        ->orWhere('serial_number', 'like', $barcode.'%');
+                        ->orWhere('label_serial_number', 'like', $barcode.'%')
+                        ->orWhere(fn ($fallback) => $fallback
+                            ->whereNull('label_serial_number')
+                            ->where('serial_number', 'like', $barcode.'%'));
                 });
 
             if ($lock) {
@@ -534,6 +544,7 @@ class OperationsSyncService
             [
                 'production_transaction_id' => $production->id,
                 'serial_number' => $production->serial_number,
+                'label_serial_number' => $production->label_serial_number,
                 'inventory_status' => $alreadyDispatched ? 'dispatched' : 'available',
                 'dispatch_status' => $alreadyDispatched ? 'dispatched' : 'not_dispatched',
             ]
@@ -546,7 +557,10 @@ class OperationsSyncService
             ->where('tenant_id', $tenantId)
             ->where(function ($query) use ($barcode): void {
                 $query->where('barcode_value', $barcode)
-                    ->orWhere('serial_number', $barcode);
+                    ->orWhere('label_serial_number', $barcode)
+                    ->orWhere(fn ($fallback) => $fallback
+                        ->whereNull('label_serial_number')
+                        ->where('serial_number', $barcode));
             });
 
         $production = $query->first();
@@ -558,9 +572,15 @@ class OperationsSyncService
             ->where('tenant_id', $tenantId)
             ->where(function ($query) use ($barcode): void {
                 $query->where('barcode_value', 'like', $barcode.'%')
-                    ->orWhere('serial_number', 'like', $barcode.'%')
+                    ->orWhere('label_serial_number', 'like', $barcode.'%')
+                    ->orWhere(fn ($fallback) => $fallback
+                        ->whereNull('label_serial_number')
+                        ->where('serial_number', 'like', $barcode.'%'))
                     ->orWhere('barcode_value', 'like', '%'.$barcode.'%')
-                    ->orWhere('serial_number', 'like', '%'.$barcode.'%');
+                    ->orWhere('label_serial_number', 'like', '%'.$barcode.'%')
+                    ->orWhere(fn ($fallback) => $fallback
+                        ->whereNull('label_serial_number')
+                        ->where('serial_number', 'like', '%'.$barcode.'%'));
             })
             ->limit(2)
             ->get();

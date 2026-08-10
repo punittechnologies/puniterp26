@@ -5,7 +5,7 @@
         <div class="card">
             <div class="card-head"><h2>Transaction</h2><span class="status-pill">{{ $row->status }}</span></div>
             <dl class="detail-list">
-                <div><dt>Serial</dt><dd>{{ $row->serial_number }}</dd></div>
+                <div><dt>Serial</dt><dd>{{ $row->label_serial_number ?? $row->serial_number }}</dd></div>
                 <div><dt>Barcode</dt><dd><code>{{ $row->barcode_value }}</code></dd></div>
                 <div><dt>Gross / Tare / Net</dt><dd>{{ $row->gross_weight }} / {{ $row->tare_weight }} / {{ $row->net_weight }} {{ $row->unit }}</dd></div>
                 <div><dt>Pieces</dt><dd>{{ $row->piece_quantity ?? '-' }}</dd></div>

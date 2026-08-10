@@ -59,6 +59,7 @@ class InwardSessionSyncTest extends TestCase
                 'inward_session_number' => 'INW-TEST-001',
                 'inward_session_status' => 'saved',
                 'serial_number' => 'SER-INW-1',
+                'label_serial_number' => 'SPM-3000',
                 'barcode_value' => 'BAR-INW-1',
                 'gross_weight' => 12.5,
                 'tare_weight' => 0.5,
@@ -72,6 +73,9 @@ class InwardSessionSyncTest extends TestCase
         $this->assertSame('saved', $session->status);
         $this->assertSame(1, $session->entry_count);
         $this->assertSame('12.000000', (string) $session->total_net_weight);
+        $this->assertSame('SPM-3000', ProductionTransaction::query()->where('tenant_id', $tenant->id)->value('label_serial_number'));
+        $this->assertSame('SPM-3000', BarcodeRecord::query()->where('tenant_id', $tenant->id)->value('label_serial_number'));
+        $this->assertSame('SPM-3000', InventoryTransaction::query()->where('tenant_id', $tenant->id)->value('label_serial_number'));
     }
 
     public function test_repeated_inward_session_sync_updates_same_record(): void
@@ -157,6 +161,7 @@ class InwardSessionSyncTest extends TestCase
                 'id' => 'local-prod-dispatch-1',
                 'product_id' => $product->id,
                 'serial_number' => 'SER-DSP-1',
+                'label_serial_number' => '3000',
                 'barcode_value' => 'BAR-DSP-1',
                 'gross_weight' => 15,
                 'tare_weight' => 0,
@@ -172,7 +177,7 @@ class InwardSessionSyncTest extends TestCase
                 'id' => 'local-dispatch-1',
                 'customer_id' => $customer->id,
                 'dispatch_number' => 'DSP-TEST-1',
-                'barcodes' => ['BAR-DSP-1'],
+                'barcodes' => ['3000'],
                 'confirmed_at' => now()->toISOString(),
             ])
             ->assertOk();
@@ -266,7 +271,7 @@ class InwardSessionSyncTest extends TestCase
 
         $this->withToken($token)
             ->withHeader('X-Tenant-Id', $tenant->id)
-            ->getJson('/api/v1/dispatch/barcodes/BAR-REPAIR-1')
+            ->getJson('/api/v1/dispatch/barcodes/SER-REPAIR-1')
             ->assertOk()
             ->assertJsonPath('data.id', $production->id)
             ->assertJsonPath('data.barcode_value', 'BAR-REPAIR-1');

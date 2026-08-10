@@ -381,6 +381,11 @@ void main() {
           ),
         );
 
+    expect(
+      (await dispatch.findAvailableBarcode(item.serialNumber))?.id,
+      item.id,
+    );
+
     await dispatch.confirmDispatch(customer: customer, items: [item]);
 
     expect(await dispatch.findAvailableBarcode(item.barcodeValue), isNull);

@@ -132,11 +132,11 @@
 
     <div class="card">
         <div class="card-head"><h2>Filtered Inventory Ledger</h2><div class="dispatch-actions"><a class="btn" href="{{ route('admin.exports', array_merge(['report' => 'inventory-ledger', 'format' => 'csv'], request()->query())) }}">CSV</a><a class="btn" href="{{ route('admin.exports', array_merge(['report' => 'inventory-ledger', 'format' => 'xlsx'], request()->query())) }}">Excel</a><a class="btn primary" href="{{ route('admin.exports', array_merge(['report' => 'inventory-ledger', 'format' => 'pdf'], request()->query())) }}">PDF</a></div></div>
-        <div class="table-wrap"><table class="data-table"><thead><tr><th>Type</th><th>Product</th><th>Barcode</th><th>Weight</th><th>PCS</th><th>Reference</th><th>Date</th></tr></thead><tbody>
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>Type</th><th>Product</th><th>Serial Number</th><th>Barcode</th><th>Weight</th><th>PCS</th><th>Reference</th><th>Date</th></tr></thead><tbody>
             @forelse($ledger as $row)
-                <tr><td>{{ $row->transaction_type }}</td><td>{{ $productNames[$row->product_id] ?? $row->product_id }}</td><td>{{ $row->barcode_value ?? '-' }}</td><td>{{ $row->weight_quantity }}</td><td>{{ $row->piece_quantity ?? '-' }}</td><td>{{ $row->reference_type }}</td><td>{{ $row->occurred_at?->format('d M Y H:i') }}</td></tr>
+                <tr><td>{{ $row->transaction_type }}</td><td>{{ $productNames[$row->product_id] ?? $row->product_id }}</td><td>{{ $row->label_serial_number ?? $row->serial_number ?? '-' }}</td><td>{{ $row->barcode_value ?? '-' }}</td><td>{{ $row->weight_quantity }}</td><td>{{ $row->piece_quantity ?? '-' }}</td><td>{{ $row->reference_type }}</td><td>{{ $row->occurred_at?->format('d M Y H:i') }}</td></tr>
             @empty
-                <tr><td colspan="7" class="empty">No ledger movements match these filters.</td></tr>
+                <tr><td colspan="8" class="empty">No ledger movements match these filters.</td></tr>
             @endforelse
         </tbody></table></div>
         {{ $ledger->links() }}

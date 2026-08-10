@@ -47,6 +47,7 @@ class SyncController extends Controller
             'inward_session_metadata' => ['nullable', 'array'],
             'warehouse_id' => ['nullable', 'uuid'],
             'serial_number' => ['required', 'string', 'max:255'],
+            'label_serial_number' => ['nullable', 'string', 'max:255'],
             'barcode_value' => ['required', 'string', 'max:255'],
             'product_snapshot' => ['nullable', 'array'],
             'dynamic_values' => ['nullable', 'array'],

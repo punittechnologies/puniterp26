@@ -15,7 +15,7 @@
             <div class="card-head"><h2>Available Recent Barcodes</h2></div>
             <div class="table-wrap"><table class="data-table"><thead><tr><th>Barcode</th><th>Serial</th><th>Weight</th></tr></thead><tbody>
                 @foreach($recentAvailable as $row)
-                    <tr><td><code>{{ $row->barcode_value }}</code></td><td>{{ $row->serial_number }}</td><td>{{ $row->net_weight }}</td></tr>
+                    <tr><td><code>{{ $row->barcode_value }}</code></td><td>{{ $row->label_serial_number ?? $row->serial_number }}</td><td>{{ $row->net_weight }}</td></tr>
                 @endforeach
             </tbody></table></div>
         </div>

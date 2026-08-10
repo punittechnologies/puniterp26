@@ -129,7 +129,10 @@ class DispatchRepository {
     final production =
         await (database.select(database.localProductionTransactions)..where(
               (row) =>
-                  row.barcodeValue.equals(barcode) &
+                  (row.barcodeValue.equals(barcode) |
+                      row.labelSerialNumber.equals(barcode) |
+                      (row.labelSerialNumber.isNull() &
+                          row.serialNumber.equals(barcode))) &
                   row.accountScope.equals(accountScope),
             ))
             .getSingleOrNull();
@@ -162,6 +165,7 @@ class DispatchRepository {
         id: data['id']?.toString() ?? 'server_$barcode',
         accountScope: await ApiSession.accountScope(),
         serialNumber: data['serial_number']?.toString() ?? barcode,
+        labelSerialNumber: data['label_serial_number']?.toString(),
         barcodeValue: data['barcode_value']?.toString() ?? barcode,
         productId: data['product_id']?.toString() ?? '',
         variantId: data['variant_id']?.toString(),
