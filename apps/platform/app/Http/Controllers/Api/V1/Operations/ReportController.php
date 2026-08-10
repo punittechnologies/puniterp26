@@ -20,7 +20,12 @@ class ReportController extends Controller
             ->when($request->filled('to'), fn ($query) => $query->whereDate('captured_at', '<=', $request->date('to')))
             ->orderByDesc('captured_at')
             ->limit((int) $request->integer('limit', 1000))
-            ->get(['serial_number', 'barcode_value', 'product_id', 'variant_id', 'gross_weight', 'tare_weight', 'net_weight', 'piece_quantity', 'unit', 'status', 'captured_at']);
+            ->get(['serial_number', 'label_serial_number', 'barcode_value', 'product_id', 'variant_id', 'gross_weight', 'tare_weight', 'net_weight', 'piece_quantity', 'unit', 'status', 'captured_at']);
+
+        $rows->each(function (ProductionTransaction $row): void {
+            $row->serial_number = $row->label_serial_number ?? $row->serial_number;
+            $row->makeHidden('label_serial_number');
+        });
 
         return $this->respond($request, 'production-report', [
             'serial_number', 'barcode_value', 'product_id', 'variant_id', 'gross_weight', 'tare_weight', 'net_weight', 'piece_quantity', 'unit', 'status', 'captured_at',
@@ -33,10 +38,15 @@ class ReportController extends Controller
             ->where('tenant_id', $tenantContext->tenantId())
             ->orderByDesc('occurred_at')
             ->limit((int) $request->integer('limit', 1000))
-            ->get(['product_id', 'variant_id', 'barcode_value', 'transaction_type', 'weight_quantity', 'piece_quantity', 'reference_type', 'reference_id', 'occurred_at']);
+            ->get(['product_id', 'variant_id', 'serial_number', 'label_serial_number', 'barcode_value', 'transaction_type', 'weight_quantity', 'piece_quantity', 'reference_type', 'reference_id', 'occurred_at']);
+
+        $rows->each(function (InventoryTransaction $row): void {
+            $row->serial_number = $row->label_serial_number ?? $row->serial_number;
+            $row->makeHidden('label_serial_number');
+        });
 
         return $this->respond($request, 'inventory-ledger', [
-            'product_id', 'variant_id', 'barcode_value', 'transaction_type', 'weight_quantity', 'piece_quantity', 'reference_type', 'reference_id', 'occurred_at',
+            'product_id', 'variant_id', 'serial_number', 'barcode_value', 'transaction_type', 'weight_quantity', 'piece_quantity', 'reference_type', 'reference_id', 'occurred_at',
         ], $rows->map->toArray()->all());
     }
 

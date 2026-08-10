@@ -70,5 +70,22 @@ class FoundationApiTest extends TestCase
             ->assertJsonPath('tenantId', $tenant->id)
             ->assertJsonPath('features.products', true)
             ->assertJsonPath('features.tvsPrinter', false);
+
+        $this->withToken($token)
+            ->withHeader('X-Tenant-Id', $tenant->id)
+            ->postJson('/api/v1/auth/confirm-password', [
+                'password' => 'password',
+                'action' => 'label_serial.updated',
+                'old_values' => ['next_number' => '1'],
+                'new_values' => ['prefix' => 'SPM-', 'next_number' => '3000'],
+            ])
+            ->assertOk()
+            ->assertJsonPath('confirmed', true);
+
+        $this->assertDatabaseHas('audit_logs', [
+            'tenant_id' => $tenant->id,
+            'user_id' => $user->id,
+            'action' => 'label_serial.updated',
+        ]);
     }
 }

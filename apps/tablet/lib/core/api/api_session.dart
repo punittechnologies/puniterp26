@@ -12,6 +12,7 @@ class ApiSession {
   static const _emailKey = 'api_email';
   static const _accountScopeKey = 'api_account_scope';
   static const _companyNameKey = 'api_company_name';
+  static const _lastSuccessfulSyncPrefix = 'last_successful_sync_';
   static const defaultBaseUrl = 'https://erp.puniterp.com/api/v1';
 
   static Future<String> baseUrl() async {
@@ -43,6 +44,25 @@ class ApiSession {
     final prefs = await SharedPreferences.getInstance();
     final value = prefs.getString(_companyNameKey)?.trim();
     return value == null || value.isEmpty ? null : value;
+  }
+
+  static Future<DateTime?> lastSuccessfulSync() async {
+    final prefs = await SharedPreferences.getInstance();
+    final scope = await accountScope();
+    return DateTime.tryParse(
+      prefs.getString('$_lastSuccessfulSyncPrefix$scope') ?? '',
+    );
+  }
+
+  static Future<DateTime> recordSuccessfulSync() async {
+    final syncedAt = DateTime.now();
+    final prefs = await SharedPreferences.getInstance();
+    final scope = await accountScope();
+    await prefs.setString(
+      '$_lastSuccessfulSyncPrefix$scope',
+      syncedAt.toIso8601String(),
+    );
+    return syncedAt;
   }
 
   static Future<void> saveCompanyName(Object? value) async {

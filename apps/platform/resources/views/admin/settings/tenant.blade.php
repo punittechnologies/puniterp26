@@ -2,7 +2,7 @@
 
 @section('content')
     @php($settings = $tenant->settings ?? [])
-    @php($baseColumns = ['sr' => 'S/R', 'barcode_value' => 'Barcode', 'product_name' => 'Product', 'gross_weight' => 'Gross kg', 'tare_weight' => 'Tare kg', 'net_weight' => 'Net kg', 'converted_unit' => 'Unit Conv.'])
+    @php($baseColumns = ['sr' => 'S/R', 'serial_number' => 'Serial Number', 'barcode_value' => 'Barcode', 'product_name' => 'Product', 'gross_weight' => 'Gross kg', 'tare_weight' => 'Tare kg', 'net_weight' => 'Net kg', 'converted_unit' => 'Unit Conv.'])
     @php($inwardColumns = array_merge($baseColumns, ['captured_at' => 'Time']))
     @php($dispatchColumns = $baseColumns)
     @php($dynamicColumns = $productFields->pluck('field_label', 'internal_key')->all())

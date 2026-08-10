@@ -54,7 +54,7 @@
                 <tbody>
                     @forelse ($rows as $row)
                         <tr>
-                            <td>{{ $row->serial_number }}</td>
+                            <td>{{ $row->label_serial_number ?? $row->serial_number }}</td>
                             <td><code>{{ $row->barcode_value }}</code></td>
                             <td>{{ $row->product_snapshot['name'] ?? $row->product_id }}</td>
                             <td>{{ $row->gross_weight }}</td>

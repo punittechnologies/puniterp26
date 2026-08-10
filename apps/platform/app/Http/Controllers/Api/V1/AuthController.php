@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\LoginRequest;
 use App\Http\Resources\Api\V1\UserResource;
+use App\Models\AuditLog;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -55,5 +56,34 @@ class AuthController extends Controller
         $request->user()->currentAccessToken()?->delete();
 
         return response()->json(['message' => 'Logged out.']);
+    }
+
+    public function confirmPassword(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'password' => ['required', 'string'],
+            'action' => ['required', 'string', 'in:label_serial.updated'],
+            'old_values' => ['nullable', 'array'],
+            'new_values' => ['required', 'array'],
+        ]);
+        $user = $request->user();
+        if (! Hash::check($data['password'], $user->password)) {
+            throw ValidationException::withMessages(['password' => 'Password is incorrect.']);
+        }
+
+        AuditLog::query()->create([
+            'tenant_id' => $user->tenant_id,
+            'user_id' => $user->id,
+            'action' => $data['action'],
+            'auditable_type' => User::class,
+            'auditable_id' => $user->id,
+            'old_values' => $data['old_values'] ?? [],
+            'new_values' => $data['new_values'],
+            'metadata' => ['source' => 'tablet_app'],
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+        ]);
+
+        return response()->json(['confirmed' => true]);
     }
 }

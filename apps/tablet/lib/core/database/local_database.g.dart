@@ -3983,6 +3983,18 @@ class $LocalProductionTransactionsTable extends LocalProductionTransactions
     requiredDuringInsert: true,
     defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'),
   );
+  static const VerificationMeta _labelSerialNumberMeta = const VerificationMeta(
+    'labelSerialNumber',
+  );
+  @override
+  late final GeneratedColumn<String> labelSerialNumber =
+      GeneratedColumn<String>(
+        'label_serial_number',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
   static const VerificationMeta _barcodeValueMeta = const VerificationMeta(
     'barcodeValue',
   );
@@ -4167,6 +4179,7 @@ class $LocalProductionTransactionsTable extends LocalProductionTransactions
     id,
     accountScope,
     serialNumber,
+    labelSerialNumber,
     barcodeValue,
     productId,
     variantId,
@@ -4220,6 +4233,15 @@ class $LocalProductionTransactionsTable extends LocalProductionTransactions
       );
     } else if (isInserting) {
       context.missing(_serialNumberMeta);
+    }
+    if (data.containsKey('label_serial_number')) {
+      context.handle(
+        _labelSerialNumberMeta,
+        labelSerialNumber.isAcceptableOrUnknown(
+          data['label_serial_number']!,
+          _labelSerialNumberMeta,
+        ),
+      );
     }
     if (data.containsKey('barcode_value')) {
       context.handle(
@@ -4383,6 +4405,10 @@ class $LocalProductionTransactionsTable extends LocalProductionTransactions
         DriftSqlType.string,
         data['${effectivePrefix}serial_number'],
       )!,
+      labelSerialNumber: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}label_serial_number'],
+      ),
       barcodeValue: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}barcode_value'],
@@ -4461,6 +4487,7 @@ class LocalProductionTransaction extends DataClass
   final String id;
   final String accountScope;
   final String serialNumber;
+  final String? labelSerialNumber;
   final String barcodeValue;
   final String productId;
   final String? variantId;
@@ -4481,6 +4508,7 @@ class LocalProductionTransaction extends DataClass
     required this.id,
     required this.accountScope,
     required this.serialNumber,
+    this.labelSerialNumber,
     required this.barcodeValue,
     required this.productId,
     this.variantId,
@@ -4504,6 +4532,9 @@ class LocalProductionTransaction extends DataClass
     map['id'] = Variable<String>(id);
     map['account_scope'] = Variable<String>(accountScope);
     map['serial_number'] = Variable<String>(serialNumber);
+    if (!nullToAbsent || labelSerialNumber != null) {
+      map['label_serial_number'] = Variable<String>(labelSerialNumber);
+    }
     map['barcode_value'] = Variable<String>(barcodeValue);
     map['product_id'] = Variable<String>(productId);
     if (!nullToAbsent || variantId != null) {
@@ -4534,6 +4565,9 @@ class LocalProductionTransaction extends DataClass
       id: Value(id),
       accountScope: Value(accountScope),
       serialNumber: Value(serialNumber),
+      labelSerialNumber: labelSerialNumber == null && nullToAbsent
+          ? const Value.absent()
+          : Value(labelSerialNumber),
       barcodeValue: Value(barcodeValue),
       productId: Value(productId),
       variantId: variantId == null && nullToAbsent
@@ -4568,6 +4602,9 @@ class LocalProductionTransaction extends DataClass
       id: serializer.fromJson<String>(json['id']),
       accountScope: serializer.fromJson<String>(json['accountScope']),
       serialNumber: serializer.fromJson<String>(json['serialNumber']),
+      labelSerialNumber: serializer.fromJson<String?>(
+        json['labelSerialNumber'],
+      ),
       barcodeValue: serializer.fromJson<String>(json['barcodeValue']),
       productId: serializer.fromJson<String>(json['productId']),
       variantId: serializer.fromJson<String?>(json['variantId']),
@@ -4595,6 +4632,7 @@ class LocalProductionTransaction extends DataClass
       'id': serializer.toJson<String>(id),
       'accountScope': serializer.toJson<String>(accountScope),
       'serialNumber': serializer.toJson<String>(serialNumber),
+      'labelSerialNumber': serializer.toJson<String?>(labelSerialNumber),
       'barcodeValue': serializer.toJson<String>(barcodeValue),
       'productId': serializer.toJson<String>(productId),
       'variantId': serializer.toJson<String?>(variantId),
@@ -4618,6 +4656,7 @@ class LocalProductionTransaction extends DataClass
     String? id,
     String? accountScope,
     String? serialNumber,
+    Value<String?> labelSerialNumber = const Value.absent(),
     String? barcodeValue,
     String? productId,
     Value<String?> variantId = const Value.absent(),
@@ -4638,6 +4677,9 @@ class LocalProductionTransaction extends DataClass
     id: id ?? this.id,
     accountScope: accountScope ?? this.accountScope,
     serialNumber: serialNumber ?? this.serialNumber,
+    labelSerialNumber: labelSerialNumber.present
+        ? labelSerialNumber.value
+        : this.labelSerialNumber,
     barcodeValue: barcodeValue ?? this.barcodeValue,
     productId: productId ?? this.productId,
     variantId: variantId.present ? variantId.value : this.variantId,
@@ -4670,6 +4712,9 @@ class LocalProductionTransaction extends DataClass
       serialNumber: data.serialNumber.present
           ? data.serialNumber.value
           : this.serialNumber,
+      labelSerialNumber: data.labelSerialNumber.present
+          ? data.labelSerialNumber.value
+          : this.labelSerialNumber,
       barcodeValue: data.barcodeValue.present
           ? data.barcodeValue.value
           : this.barcodeValue,
@@ -4717,6 +4762,7 @@ class LocalProductionTransaction extends DataClass
           ..write('id: $id, ')
           ..write('accountScope: $accountScope, ')
           ..write('serialNumber: $serialNumber, ')
+          ..write('labelSerialNumber: $labelSerialNumber, ')
           ..write('barcodeValue: $barcodeValue, ')
           ..write('productId: $productId, ')
           ..write('variantId: $variantId, ')
@@ -4742,6 +4788,7 @@ class LocalProductionTransaction extends DataClass
     id,
     accountScope,
     serialNumber,
+    labelSerialNumber,
     barcodeValue,
     productId,
     variantId,
@@ -4766,6 +4813,7 @@ class LocalProductionTransaction extends DataClass
           other.id == this.id &&
           other.accountScope == this.accountScope &&
           other.serialNumber == this.serialNumber &&
+          other.labelSerialNumber == this.labelSerialNumber &&
           other.barcodeValue == this.barcodeValue &&
           other.productId == this.productId &&
           other.variantId == this.variantId &&
@@ -4789,6 +4837,7 @@ class LocalProductionTransactionsCompanion
   final Value<String> id;
   final Value<String> accountScope;
   final Value<String> serialNumber;
+  final Value<String?> labelSerialNumber;
   final Value<String> barcodeValue;
   final Value<String> productId;
   final Value<String?> variantId;
@@ -4810,6 +4859,7 @@ class LocalProductionTransactionsCompanion
     this.id = const Value.absent(),
     this.accountScope = const Value.absent(),
     this.serialNumber = const Value.absent(),
+    this.labelSerialNumber = const Value.absent(),
     this.barcodeValue = const Value.absent(),
     this.productId = const Value.absent(),
     this.variantId = const Value.absent(),
@@ -4832,6 +4882,7 @@ class LocalProductionTransactionsCompanion
     required String id,
     this.accountScope = const Value.absent(),
     required String serialNumber,
+    this.labelSerialNumber = const Value.absent(),
     required String barcodeValue,
     required String productId,
     this.variantId = const Value.absent(),
@@ -4864,6 +4915,7 @@ class LocalProductionTransactionsCompanion
     Expression<String>? id,
     Expression<String>? accountScope,
     Expression<String>? serialNumber,
+    Expression<String>? labelSerialNumber,
     Expression<String>? barcodeValue,
     Expression<String>? productId,
     Expression<String>? variantId,
@@ -4886,6 +4938,7 @@ class LocalProductionTransactionsCompanion
       if (id != null) 'id': id,
       if (accountScope != null) 'account_scope': accountScope,
       if (serialNumber != null) 'serial_number': serialNumber,
+      if (labelSerialNumber != null) 'label_serial_number': labelSerialNumber,
       if (barcodeValue != null) 'barcode_value': barcodeValue,
       if (productId != null) 'product_id': productId,
       if (variantId != null) 'variant_id': variantId,
@@ -4911,6 +4964,7 @@ class LocalProductionTransactionsCompanion
     Value<String>? id,
     Value<String>? accountScope,
     Value<String>? serialNumber,
+    Value<String?>? labelSerialNumber,
     Value<String>? barcodeValue,
     Value<String>? productId,
     Value<String?>? variantId,
@@ -4933,6 +4987,7 @@ class LocalProductionTransactionsCompanion
       id: id ?? this.id,
       accountScope: accountScope ?? this.accountScope,
       serialNumber: serialNumber ?? this.serialNumber,
+      labelSerialNumber: labelSerialNumber ?? this.labelSerialNumber,
       barcodeValue: barcodeValue ?? this.barcodeValue,
       productId: productId ?? this.productId,
       variantId: variantId ?? this.variantId,
@@ -4964,6 +5019,9 @@ class LocalProductionTransactionsCompanion
     }
     if (serialNumber.present) {
       map['serial_number'] = Variable<String>(serialNumber.value);
+    }
+    if (labelSerialNumber.present) {
+      map['label_serial_number'] = Variable<String>(labelSerialNumber.value);
     }
     if (barcodeValue.present) {
       map['barcode_value'] = Variable<String>(barcodeValue.value);
@@ -5027,6 +5085,7 @@ class LocalProductionTransactionsCompanion
           ..write('id: $id, ')
           ..write('accountScope: $accountScope, ')
           ..write('serialNumber: $serialNumber, ')
+          ..write('labelSerialNumber: $labelSerialNumber, ')
           ..write('barcodeValue: $barcodeValue, ')
           ..write('productId: $productId, ')
           ..write('variantId: $variantId, ')
@@ -5109,6 +5168,18 @@ class $LocalInventoryLedgerTable extends LocalInventoryLedger
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _labelSerialNumberMeta = const VerificationMeta(
+    'labelSerialNumber',
+  );
+  @override
+  late final GeneratedColumn<String> labelSerialNumber =
+      GeneratedColumn<String>(
+        'label_serial_number',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
   static const VerificationMeta _barcodeValueMeta = const VerificationMeta(
     'barcodeValue',
   );
@@ -5205,6 +5276,7 @@ class $LocalInventoryLedgerTable extends LocalInventoryLedger
     productId,
     variantId,
     serialNumber,
+    labelSerialNumber,
     barcodeValue,
     transactionType,
     weightQuantity,
@@ -5260,6 +5332,15 @@ class $LocalInventoryLedgerTable extends LocalInventoryLedger
         serialNumber.isAcceptableOrUnknown(
           data['serial_number']!,
           _serialNumberMeta,
+        ),
+      );
+    }
+    if (data.containsKey('label_serial_number')) {
+      context.handle(
+        _labelSerialNumberMeta,
+        labelSerialNumber.isAcceptableOrUnknown(
+          data['label_serial_number']!,
+          _labelSerialNumberMeta,
         ),
       );
     }
@@ -5371,6 +5452,10 @@ class $LocalInventoryLedgerTable extends LocalInventoryLedger
         DriftSqlType.string,
         data['${effectivePrefix}serial_number'],
       ),
+      labelSerialNumber: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}label_serial_number'],
+      ),
       barcodeValue: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}barcode_value'],
@@ -5419,6 +5504,7 @@ class LocalInventoryLedgerData extends DataClass
   final String productId;
   final String? variantId;
   final String? serialNumber;
+  final String? labelSerialNumber;
   final String? barcodeValue;
   final String transactionType;
   final double weightQuantity;
@@ -5433,6 +5519,7 @@ class LocalInventoryLedgerData extends DataClass
     required this.productId,
     this.variantId,
     this.serialNumber,
+    this.labelSerialNumber,
     this.barcodeValue,
     required this.transactionType,
     required this.weightQuantity,
@@ -5453,6 +5540,9 @@ class LocalInventoryLedgerData extends DataClass
     }
     if (!nullToAbsent || serialNumber != null) {
       map['serial_number'] = Variable<String>(serialNumber);
+    }
+    if (!nullToAbsent || labelSerialNumber != null) {
+      map['label_serial_number'] = Variable<String>(labelSerialNumber);
     }
     if (!nullToAbsent || barcodeValue != null) {
       map['barcode_value'] = Variable<String>(barcodeValue);
@@ -5480,6 +5570,9 @@ class LocalInventoryLedgerData extends DataClass
       serialNumber: serialNumber == null && nullToAbsent
           ? const Value.absent()
           : Value(serialNumber),
+      labelSerialNumber: labelSerialNumber == null && nullToAbsent
+          ? const Value.absent()
+          : Value(labelSerialNumber),
       barcodeValue: barcodeValue == null && nullToAbsent
           ? const Value.absent()
           : Value(barcodeValue),
@@ -5506,6 +5599,9 @@ class LocalInventoryLedgerData extends DataClass
       productId: serializer.fromJson<String>(json['productId']),
       variantId: serializer.fromJson<String?>(json['variantId']),
       serialNumber: serializer.fromJson<String?>(json['serialNumber']),
+      labelSerialNumber: serializer.fromJson<String?>(
+        json['labelSerialNumber'],
+      ),
       barcodeValue: serializer.fromJson<String?>(json['barcodeValue']),
       transactionType: serializer.fromJson<String>(json['transactionType']),
       weightQuantity: serializer.fromJson<double>(json['weightQuantity']),
@@ -5525,6 +5621,7 @@ class LocalInventoryLedgerData extends DataClass
       'productId': serializer.toJson<String>(productId),
       'variantId': serializer.toJson<String?>(variantId),
       'serialNumber': serializer.toJson<String?>(serialNumber),
+      'labelSerialNumber': serializer.toJson<String?>(labelSerialNumber),
       'barcodeValue': serializer.toJson<String?>(barcodeValue),
       'transactionType': serializer.toJson<String>(transactionType),
       'weightQuantity': serializer.toJson<double>(weightQuantity),
@@ -5542,6 +5639,7 @@ class LocalInventoryLedgerData extends DataClass
     String? productId,
     Value<String?> variantId = const Value.absent(),
     Value<String?> serialNumber = const Value.absent(),
+    Value<String?> labelSerialNumber = const Value.absent(),
     Value<String?> barcodeValue = const Value.absent(),
     String? transactionType,
     double? weightQuantity,
@@ -5556,6 +5654,9 @@ class LocalInventoryLedgerData extends DataClass
     productId: productId ?? this.productId,
     variantId: variantId.present ? variantId.value : this.variantId,
     serialNumber: serialNumber.present ? serialNumber.value : this.serialNumber,
+    labelSerialNumber: labelSerialNumber.present
+        ? labelSerialNumber.value
+        : this.labelSerialNumber,
     barcodeValue: barcodeValue.present ? barcodeValue.value : this.barcodeValue,
     transactionType: transactionType ?? this.transactionType,
     weightQuantity: weightQuantity ?? this.weightQuantity,
@@ -5580,6 +5681,9 @@ class LocalInventoryLedgerData extends DataClass
       serialNumber: data.serialNumber.present
           ? data.serialNumber.value
           : this.serialNumber,
+      labelSerialNumber: data.labelSerialNumber.present
+          ? data.labelSerialNumber.value
+          : this.labelSerialNumber,
       barcodeValue: data.barcodeValue.present
           ? data.barcodeValue.value
           : this.barcodeValue,
@@ -5615,6 +5719,7 @@ class LocalInventoryLedgerData extends DataClass
           ..write('productId: $productId, ')
           ..write('variantId: $variantId, ')
           ..write('serialNumber: $serialNumber, ')
+          ..write('labelSerialNumber: $labelSerialNumber, ')
           ..write('barcodeValue: $barcodeValue, ')
           ..write('transactionType: $transactionType, ')
           ..write('weightQuantity: $weightQuantity, ')
@@ -5634,6 +5739,7 @@ class LocalInventoryLedgerData extends DataClass
     productId,
     variantId,
     serialNumber,
+    labelSerialNumber,
     barcodeValue,
     transactionType,
     weightQuantity,
@@ -5652,6 +5758,7 @@ class LocalInventoryLedgerData extends DataClass
           other.productId == this.productId &&
           other.variantId == this.variantId &&
           other.serialNumber == this.serialNumber &&
+          other.labelSerialNumber == this.labelSerialNumber &&
           other.barcodeValue == this.barcodeValue &&
           other.transactionType == this.transactionType &&
           other.weightQuantity == this.weightQuantity &&
@@ -5669,6 +5776,7 @@ class LocalInventoryLedgerCompanion
   final Value<String> productId;
   final Value<String?> variantId;
   final Value<String?> serialNumber;
+  final Value<String?> labelSerialNumber;
   final Value<String?> barcodeValue;
   final Value<String> transactionType;
   final Value<double> weightQuantity;
@@ -5684,6 +5792,7 @@ class LocalInventoryLedgerCompanion
     this.productId = const Value.absent(),
     this.variantId = const Value.absent(),
     this.serialNumber = const Value.absent(),
+    this.labelSerialNumber = const Value.absent(),
     this.barcodeValue = const Value.absent(),
     this.transactionType = const Value.absent(),
     this.weightQuantity = const Value.absent(),
@@ -5700,6 +5809,7 @@ class LocalInventoryLedgerCompanion
     required String productId,
     this.variantId = const Value.absent(),
     this.serialNumber = const Value.absent(),
+    this.labelSerialNumber = const Value.absent(),
     this.barcodeValue = const Value.absent(),
     required String transactionType,
     required double weightQuantity,
@@ -5722,6 +5832,7 @@ class LocalInventoryLedgerCompanion
     Expression<String>? productId,
     Expression<String>? variantId,
     Expression<String>? serialNumber,
+    Expression<String>? labelSerialNumber,
     Expression<String>? barcodeValue,
     Expression<String>? transactionType,
     Expression<double>? weightQuantity,
@@ -5738,6 +5849,7 @@ class LocalInventoryLedgerCompanion
       if (productId != null) 'product_id': productId,
       if (variantId != null) 'variant_id': variantId,
       if (serialNumber != null) 'serial_number': serialNumber,
+      if (labelSerialNumber != null) 'label_serial_number': labelSerialNumber,
       if (barcodeValue != null) 'barcode_value': barcodeValue,
       if (transactionType != null) 'transaction_type': transactionType,
       if (weightQuantity != null) 'weight_quantity': weightQuantity,
@@ -5756,6 +5868,7 @@ class LocalInventoryLedgerCompanion
     Value<String>? productId,
     Value<String?>? variantId,
     Value<String?>? serialNumber,
+    Value<String?>? labelSerialNumber,
     Value<String?>? barcodeValue,
     Value<String>? transactionType,
     Value<double>? weightQuantity,
@@ -5772,6 +5885,7 @@ class LocalInventoryLedgerCompanion
       productId: productId ?? this.productId,
       variantId: variantId ?? this.variantId,
       serialNumber: serialNumber ?? this.serialNumber,
+      labelSerialNumber: labelSerialNumber ?? this.labelSerialNumber,
       barcodeValue: barcodeValue ?? this.barcodeValue,
       transactionType: transactionType ?? this.transactionType,
       weightQuantity: weightQuantity ?? this.weightQuantity,
@@ -5801,6 +5915,9 @@ class LocalInventoryLedgerCompanion
     }
     if (serialNumber.present) {
       map['serial_number'] = Variable<String>(serialNumber.value);
+    }
+    if (labelSerialNumber.present) {
+      map['label_serial_number'] = Variable<String>(labelSerialNumber.value);
     }
     if (barcodeValue.present) {
       map['barcode_value'] = Variable<String>(barcodeValue.value);
@@ -5840,6 +5957,7 @@ class LocalInventoryLedgerCompanion
           ..write('productId: $productId, ')
           ..write('variantId: $variantId, ')
           ..write('serialNumber: $serialNumber, ')
+          ..write('labelSerialNumber: $labelSerialNumber, ')
           ..write('barcodeValue: $barcodeValue, ')
           ..write('transactionType: $transactionType, ')
           ..write('weightQuantity: $weightQuantity, ')
@@ -9628,6 +9746,7 @@ typedef $$LocalProductionTransactionsTableCreateCompanionBuilder =
       required String id,
       Value<String> accountScope,
       required String serialNumber,
+      Value<String?> labelSerialNumber,
       required String barcodeValue,
       required String productId,
       Value<String?> variantId,
@@ -9651,6 +9770,7 @@ typedef $$LocalProductionTransactionsTableUpdateCompanionBuilder =
       Value<String> id,
       Value<String> accountScope,
       Value<String> serialNumber,
+      Value<String?> labelSerialNumber,
       Value<String> barcodeValue,
       Value<String> productId,
       Value<String?> variantId,
@@ -9691,6 +9811,11 @@ class $$LocalProductionTransactionsTableFilterComposer
 
   ColumnFilters<String> get serialNumber => $composableBuilder(
     column: $table.serialNumber,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get labelSerialNumber => $composableBuilder(
+    column: $table.labelSerialNumber,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -9799,6 +9924,11 @@ class $$LocalProductionTransactionsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get labelSerialNumber => $composableBuilder(
+    column: $table.labelSerialNumber,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get barcodeValue => $composableBuilder(
     column: $table.barcodeValue,
     builder: (column) => ColumnOrderings(column),
@@ -9899,6 +10029,11 @@ class $$LocalProductionTransactionsTableAnnotationComposer
 
   GeneratedColumn<String> get serialNumber => $composableBuilder(
     column: $table.serialNumber,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get labelSerialNumber => $composableBuilder(
+    column: $table.labelSerialNumber,
     builder: (column) => column,
   );
 
@@ -10022,6 +10157,7 @@ class $$LocalProductionTransactionsTableTableManager
                 Value<String> id = const Value.absent(),
                 Value<String> accountScope = const Value.absent(),
                 Value<String> serialNumber = const Value.absent(),
+                Value<String?> labelSerialNumber = const Value.absent(),
                 Value<String> barcodeValue = const Value.absent(),
                 Value<String> productId = const Value.absent(),
                 Value<String?> variantId = const Value.absent(),
@@ -10043,6 +10179,7 @@ class $$LocalProductionTransactionsTableTableManager
                 id: id,
                 accountScope: accountScope,
                 serialNumber: serialNumber,
+                labelSerialNumber: labelSerialNumber,
                 barcodeValue: barcodeValue,
                 productId: productId,
                 variantId: variantId,
@@ -10066,6 +10203,7 @@ class $$LocalProductionTransactionsTableTableManager
                 required String id,
                 Value<String> accountScope = const Value.absent(),
                 required String serialNumber,
+                Value<String?> labelSerialNumber = const Value.absent(),
                 required String barcodeValue,
                 required String productId,
                 Value<String?> variantId = const Value.absent(),
@@ -10087,6 +10225,7 @@ class $$LocalProductionTransactionsTableTableManager
                 id: id,
                 accountScope: accountScope,
                 serialNumber: serialNumber,
+                labelSerialNumber: labelSerialNumber,
                 barcodeValue: barcodeValue,
                 productId: productId,
                 variantId: variantId,
@@ -10141,6 +10280,7 @@ typedef $$LocalInventoryLedgerTableCreateCompanionBuilder =
       required String productId,
       Value<String?> variantId,
       Value<String?> serialNumber,
+      Value<String?> labelSerialNumber,
       Value<String?> barcodeValue,
       required String transactionType,
       required double weightQuantity,
@@ -10158,6 +10298,7 @@ typedef $$LocalInventoryLedgerTableUpdateCompanionBuilder =
       Value<String> productId,
       Value<String?> variantId,
       Value<String?> serialNumber,
+      Value<String?> labelSerialNumber,
       Value<String?> barcodeValue,
       Value<String> transactionType,
       Value<double> weightQuantity,
@@ -10200,6 +10341,11 @@ class $$LocalInventoryLedgerTableFilterComposer
 
   ColumnFilters<String> get serialNumber => $composableBuilder(
     column: $table.serialNumber,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get labelSerialNumber => $composableBuilder(
+    column: $table.labelSerialNumber,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -10278,6 +10424,11 @@ class $$LocalInventoryLedgerTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get labelSerialNumber => $composableBuilder(
+    column: $table.labelSerialNumber,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get barcodeValue => $composableBuilder(
     column: $table.barcodeValue,
     builder: (column) => ColumnOrderings(column),
@@ -10344,6 +10495,11 @@ class $$LocalInventoryLedgerTableAnnotationComposer
 
   GeneratedColumn<String> get serialNumber => $composableBuilder(
     column: $table.serialNumber,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get labelSerialNumber => $composableBuilder(
+    column: $table.labelSerialNumber,
     builder: (column) => column,
   );
 
@@ -10436,6 +10592,7 @@ class $$LocalInventoryLedgerTableTableManager
                 Value<String> productId = const Value.absent(),
                 Value<String?> variantId = const Value.absent(),
                 Value<String?> serialNumber = const Value.absent(),
+                Value<String?> labelSerialNumber = const Value.absent(),
                 Value<String?> barcodeValue = const Value.absent(),
                 Value<String> transactionType = const Value.absent(),
                 Value<double> weightQuantity = const Value.absent(),
@@ -10451,6 +10608,7 @@ class $$LocalInventoryLedgerTableTableManager
                 productId: productId,
                 variantId: variantId,
                 serialNumber: serialNumber,
+                labelSerialNumber: labelSerialNumber,
                 barcodeValue: barcodeValue,
                 transactionType: transactionType,
                 weightQuantity: weightQuantity,
@@ -10468,6 +10626,7 @@ class $$LocalInventoryLedgerTableTableManager
                 required String productId,
                 Value<String?> variantId = const Value.absent(),
                 Value<String?> serialNumber = const Value.absent(),
+                Value<String?> labelSerialNumber = const Value.absent(),
                 Value<String?> barcodeValue = const Value.absent(),
                 required String transactionType,
                 required double weightQuantity,
@@ -10483,6 +10642,7 @@ class $$LocalInventoryLedgerTableTableManager
                 productId: productId,
                 variantId: variantId,
                 serialNumber: serialNumber,
+                labelSerialNumber: labelSerialNumber,
                 barcodeValue: barcodeValue,
                 transactionType: transactionType,
                 weightQuantity: weightQuantity,

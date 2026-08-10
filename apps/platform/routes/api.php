@@ -22,6 +22,7 @@ Route::prefix('v1')->group(function (): void {
 
     Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
         Route::get('auth/me', [AuthController::class, 'me']);
+        Route::post('auth/confirm-password', [AuthController::class, 'confirmPassword']);
         Route::post('auth/logout', [AuthController::class, 'logout']);
         Route::get('sync/bootstrap', [FoundationController::class, 'syncBootstrap']);
 

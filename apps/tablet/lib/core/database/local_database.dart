@@ -120,6 +120,7 @@ class LocalProductionTransactions extends Table {
   TextColumn get id => text()();
   TextColumn get accountScope => text().withDefault(const Constant('legacy'))();
   TextColumn get serialNumber => text().unique()();
+  TextColumn get labelSerialNumber => text().nullable()();
   TextColumn get barcodeValue => text().unique()();
   TextColumn get productId => text()();
   TextColumn get variantId => text().nullable()();
@@ -148,6 +149,7 @@ class LocalInventoryLedger extends Table {
   TextColumn get productId => text()();
   TextColumn get variantId => text().nullable()();
   TextColumn get serialNumber => text().nullable()();
+  TextColumn get labelSerialNumber => text().nullable()();
   TextColumn get barcodeValue => text().nullable()();
   TextColumn get transactionType => text()();
   RealColumn get weightQuantity => real()();
@@ -236,7 +238,7 @@ class LocalDatabase extends _$LocalDatabase {
   final bool _closeOnDispose;
 
   @override
-  int get schemaVersion => 6;
+  int get schemaVersion => 7;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -264,6 +266,16 @@ class LocalDatabase extends _$LocalDatabase {
         );
         await m.addColumn(localDispatches, localDispatches.accountScope);
         await m.addColumn(localDispatchItems, localDispatchItems.accountScope);
+      }
+      if (from < 7) {
+        await m.addColumn(
+          localProductionTransactions,
+          localProductionTransactions.labelSerialNumber,
+        );
+        await m.addColumn(
+          localInventoryLedger,
+          localInventoryLedger.labelSerialNumber,
+        );
       }
     },
   );

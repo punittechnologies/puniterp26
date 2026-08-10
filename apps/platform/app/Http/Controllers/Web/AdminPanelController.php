@@ -94,7 +94,9 @@ class AdminPanelController extends Controller
                 ->orderByDesc('weight')
                 ->limit(8)
                 ->get(),
-            'recentProduction' => ProductionTransaction::query()->where('tenant_id', $tenantId)->latest('captured_at')->limit(8)->get(),
+            'recentProduction' => ProductionTransaction::query()->where('tenant_id', $tenantId)->latest('captured_at')->limit(8)->get()->each(function (ProductionTransaction $row): void {
+                $row->serial_number = $row->label_serial_number ?? $row->serial_number;
+            }),
             'recentDispatches' => Dispatch::query()->where('tenant_id', $tenantId)->latest('created_at')->limit(8)->get(),
             'recentInwardCards' => InwardSession::query()->where('tenant_id', $tenantId)->latest('started_at')->limit(5)->get(),
             'recentDispatchCards' => Dispatch::query()->where('tenant_id', $tenantId)->latest('created_at')->limit(5)->get(),
@@ -586,7 +588,8 @@ class AdminPanelController extends Controller
             ->where('tenant_id', $tenantId)
             ->whereBetween('captured_at', [$from, $to])
             ->when($request->filled('search'), fn ($query) => $query->where(fn ($query) => $query
-                ->where('serial_number', 'like', '%'.$request->search.'%')
+                ->where('label_serial_number', 'like', '%'.$request->search.'%')
+                ->orWhere(fn ($query) => $query->whereNull('label_serial_number')->where('serial_number', 'like', '%'.$request->search.'%'))
                 ->orWhere('barcode_value', 'like', '%'.$request->search.'%')))
             ->when($request->filled('status'), fn ($query) => $query->where('status', $request->status))
             ->latest('captured_at');
@@ -682,6 +685,7 @@ class AdminPanelController extends Controller
                 'product_id' => $production->product_id,
                 'variant_id' => $production->variant_id,
                 'serial_number' => $production->serial_number,
+                'label_serial_number' => $production->label_serial_number,
                 'barcode_value' => $production->barcode_value,
                 'transaction_type' => 'production_cancellation',
                 'weight_quantity' => $production->net_weight,
@@ -1021,7 +1025,12 @@ class AdminPanelController extends Controller
                         ->orWhere('customer_snapshot->name', 'like', $search)
                         ->orWhereHas('items', fn ($query) => $query
                             ->where('barcode_value', 'like', $search)
-                            ->orWhere('serial_number', 'like', $search));
+                            ->orWhereIn('production_transaction_id', ProductionTransaction::query()
+                                ->select('id')
+                                ->where('tenant_id', $this->tenantId())
+                                ->where(fn ($production) => $production
+                                    ->where('label_serial_number', 'like', $search)
+                                    ->orWhere(fn ($fallback) => $fallback->whereNull('label_serial_number')->where('serial_number', 'like', $search)))));
                 });
             })
             ->latest();
@@ -1081,6 +1090,7 @@ class AdminPanelController extends Controller
                     'product_id' => $production->product_id,
                     'variant_id' => $production->variant_id,
                     'serial_number' => $production->serial_number,
+                    'label_serial_number' => $production->label_serial_number,
                     'barcode_value' => $production->barcode_value,
                     'transaction_type' => 'dispatch_reversal',
                     'weight_quantity' => $production->net_weight,
@@ -1580,7 +1590,13 @@ class AdminPanelController extends Controller
         $query
             ->when($filters['product_ids'] !== [], fn ($query) => $query->whereIn($alias.'.product_id', $filters['product_ids']))
             ->when($filters['variant_id'] !== '', fn ($query) => $query->where($alias.'.variant_id', $filters['variant_id']))
-            ->when($filters['serial'] !== '', fn ($query) => $query->where($alias.'.serial_number', 'like', '%'.$filters['serial'].'%'))
+            ->when($filters['serial'] !== '', fn ($query) => $query->where(function ($query) use ($alias, $filters): void {
+                $query->where($alias.'.label_serial_number', 'like', '%'.$filters['serial'].'%')
+                    ->orWhere(function ($query) use ($alias, $filters): void {
+                        $query->whereNull($alias.'.label_serial_number')
+                            ->where($alias.'.serial_number', 'like', '%'.$filters['serial'].'%');
+                    });
+            }))
             ->when($filters['barcode'] !== '', fn ($query) => $query->where($alias.'.barcode_value', 'like', '%'.$filters['barcode'].'%'))
             ->when($filters['weight_min'] !== '', fn ($query) => $query->where($alias.'.net_weight', '>=', (float) $filters['weight_min']))
             ->when($filters['weight_max'] !== '', fn ($query) => $query->where($alias.'.net_weight', '<=', (float) $filters['weight_max']))
@@ -1774,13 +1790,15 @@ class AdminPanelController extends Controller
                 $search = '%'.$value.'%';
                 $query->where(fn ($query) => $query
                     ->where('barcode_value', 'like', $search)
+                    ->orWhere('label_serial_number', 'like', $search)
                     ->orWhereIn('product_id', Product::query()->select('id')->where('tenant_id', $tenantId)->where('name', 'like', $search))
                     ->orWhereIn('variant_id', ProductVariant::query()->select('id')->where('tenant_id', $tenantId)->where('name', 'like', $search))
                     ->orWhereIn('barcode_value', ProductionTransaction::query()
                         ->select('barcode_value')
                         ->where('tenant_id', $tenantId)
                         ->where(fn ($production) => $production
-                            ->where('serial_number', 'like', $search)
+                            ->where('label_serial_number', 'like', $search)
+                            ->orWhere(fn ($query) => $query->whereNull('label_serial_number')->where('serial_number', 'like', $search))
                             ->orWhere('barcode_value', 'like', $search))));
             });
 
@@ -1794,7 +1812,7 @@ class AdminPanelController extends Controller
     public function reportColumns(string $report): array
     {
         return match ($report) {
-            'inventory', 'inventory-ledger' => ['transaction_type', 'product_id', 'variant_id', 'barcode_value', 'weight_quantity', 'piece_quantity', 'reference_type', 'occurred_at'],
+            'inventory', 'inventory-ledger' => ['transaction_type', 'product_id', 'variant_id', 'label_serial_number', 'barcode_value', 'weight_quantity', 'piece_quantity', 'reference_type', 'occurred_at'],
             'dispatch', 'customer-dispatch' => ['dispatch_number', 'customer_snapshot.name', 'status', 'vehicle_number', 'driver_name', 'transporter', 'total_weight', 'total_pieces', 'confirmed_at'],
             'audit' => ['action', 'auditable_type', 'auditable_id', 'created_at'],
             default => ['serial_number', 'barcode_value', 'product_id', 'variant_id', 'gross_weight', 'tare_weight', 'net_weight', 'piece_quantity', 'status', 'captured_at'],
@@ -1853,7 +1871,8 @@ class AdminPanelController extends Controller
             ->when($filters['search'] ?? null, function ($query, string $value) use ($tenantId): void {
                 $search = '%'.$value.'%';
                 $query->where(fn ($query) => $query
-                    ->where('serial_number', 'like', $search)
+                    ->where('label_serial_number', 'like', $search)
+                    ->orWhere(fn ($query) => $query->whereNull('label_serial_number')->where('serial_number', 'like', $search))
                     ->orWhere('barcode_value', 'like', $search)
                     ->orWhereIn('product_id', Product::query()->select('id')->where('tenant_id', $tenantId)->where('name', 'like', $search))
                     ->orWhereIn('variant_id', ProductVariant::query()->select('id')->where('tenant_id', $tenantId)->where('name', 'like', $search)));
@@ -2143,7 +2162,7 @@ class AdminPanelController extends Controller
                 'product_name' => $this->productionProductName($production),
                 'variant_name' => $variant?->name ?? '-',
                 'product_fields' => $dynamic,
-                'serial_number' => $production?->serial_number ?? '-',
+                'serial_number' => $production?->label_serial_number ?? $production?->serial_number ?? '-',
                 'gross_weight' => (float) ($production?->gross_weight ?? $item->weight_quantity),
                 'tare_weight' => (float) ($production?->tare_weight ?? 0),
                 'net_weight' => (float) ($production?->net_weight ?? $item->weight_quantity),
@@ -2175,7 +2194,7 @@ class AdminPanelController extends Controller
                 'product_name' => $this->productionProductName($production),
                 'variant_name' => $variants->get($production->variant_id)?->name ?? '-',
                 'product_fields' => $dynamic,
-                'serial_number' => $production->serial_number,
+                'serial_number' => $production->label_serial_number ?? $production->serial_number,
                 'gross_weight' => (float) $production->gross_weight,
                 'tare_weight' => (float) $production->tare_weight,
                 'net_weight' => (float) $production->net_weight,
@@ -2376,6 +2395,7 @@ class AdminPanelController extends Controller
             ->all();
         $available = [
             'sr' => 'S/R',
+            'serial_number' => 'Serial Number',
             'barcode_value' => 'Barcode',
             'product_name' => 'Product',
             ...$dynamic,
@@ -2405,6 +2425,7 @@ class AdminPanelController extends Controller
     {
         $reserved = [
             'sr',
+            'serial_number',
             'barcode_value',
             'product_name',
             'gross_weight',

@@ -25,6 +25,7 @@ import '../../products/data/product_repository.dart';
 import '../../products/domain/product_models.dart';
 import '../../verification/data/qr_verification_repository.dart';
 import '../data/production_repository.dart';
+import '../data/label_serial_service.dart';
 import '../data/scale_adapters.dart';
 import '../domain/scale_models.dart';
 import '../domain/weighing_logic.dart';
@@ -161,6 +162,7 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
   late final ScaleConnectionManager scaleManager;
   late final WeighingController controller;
   late final WeighingSession session;
+  final labelSerialService = const LabelSerialService();
   StreamSubscription<ScaleReading>? subscription;
   StreamSubscription<ScaleConnectionStatus>? statusSubscription;
 
@@ -200,6 +202,13 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
   bool savingAndPrinting = false;
   bool qrDiagnosticBusy = false;
   String appVersionLabel = 'Version loading…';
+  LabelSerialSettings labelSerialSettings = LabelSerialSettings(
+    prefix: '',
+    nextNumber: BigInt.one,
+    digits: 0,
+    increment: BigInt.one,
+  );
+  LocalProductionTransaction? failedPrintTransaction;
   final Map<String, TextEditingController> fieldControllers = {};
   final Map<String, String> dynamicValues = {};
   final Set<String> _batchAppliedKeys = {};
@@ -373,6 +382,7 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
     );
     session = WeighingSession();
     _loadAppVersion();
+    _loadLabelSerial();
     _load();
     _connectScale();
     _loadPrinter();
@@ -389,7 +399,160 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
     } catch (_) {
       if (!mounted) return;
       setState(
-        () => appVersionLabel = 'v1.1.19 (build 24) • ${AppEdition.releaseId}',
+        () => appVersionLabel = 'v1.1.20 (build 25) • ${AppEdition.releaseId}',
+      );
+    }
+  }
+
+  Future<void> _loadLabelSerial() async {
+    final settings = await labelSerialService.load();
+    if (mounted) setState(() => labelSerialSettings = settings);
+  }
+
+  Future<void> _editLabelSerial() async {
+    final current = labelSerialSettings;
+    final prefix = TextEditingController(text: current.prefix);
+    final next = TextEditingController(text: current.nextNumber.toString());
+    final digits = TextEditingController(
+      text: current.digits == 0 ? '' : current.digits.toString(),
+    );
+    final increment = TextEditingController(text: current.increment.toString());
+    final password = TextEditingController();
+    final result = await showDialog<_SerialEditResult>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Serial Number Setup'),
+        content: SingleChildScrollView(
+          child: SizedBox(
+            width: 430,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: prefix,
+                  decoration: const InputDecoration(
+                    labelText: 'Prefix (optional)',
+                    hintText: 'Example: SPM-',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: next,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Next number'),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: digits,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Minimum digits (optional)',
+                    hintText: 'Automatic',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: increment,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Increment by'),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: password,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Current app password',
+                    helperText: 'Required to save or reset the sequence.',
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'Changing to an earlier number may repeat a visible Serial Number. PUNIT ERP keeps a hidden unique record for backend tracing.',
+                  style: TextStyle(color: Color(0xFF9A3412)),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final nextValue = BigInt.tryParse(next.text.trim());
+              final incrementValue = BigInt.tryParse(increment.text.trim());
+              final digitValue = digits.text.trim().isEmpty
+                  ? 0
+                  : int.tryParse(digits.text.trim());
+              final cleanPrefix = prefix.text.trim();
+              final validPrefix = RegExp(
+                r'^[A-Za-z0-9_-]*$',
+              ).hasMatch(cleanPrefix);
+              if (nextValue == null ||
+                  nextValue.isNegative ||
+                  incrementValue == null ||
+                  incrementValue <= BigInt.zero ||
+                  digitValue == null ||
+                  digitValue < 0 ||
+                  digitValue > 24 ||
+                  !validPrefix ||
+                  password.text.isEmpty) {
+                ScaffoldMessenger.of(dialogContext).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Enter a valid number, optional 0–24 digits, prefix and password.',
+                    ),
+                  ),
+                );
+                return;
+              }
+              Navigator.pop(
+                dialogContext,
+                _SerialEditResult(
+                  settings: LabelSerialSettings(
+                    prefix: cleanPrefix,
+                    nextNumber: nextValue,
+                    digits: digitValue,
+                    increment: incrementValue,
+                  ),
+                  password: password.text,
+                ),
+              );
+            },
+            child: const Text('Save Setup'),
+          ),
+        ],
+      ),
+    );
+    prefix.dispose();
+    next.dispose();
+    digits.dispose();
+    increment.dispose();
+    password.dispose();
+    if (result == null) return;
+    final client = await ApiSession.client();
+    if (client == null) {
+      _showCornerMessage(
+        'Connect to the server before changing Serial Number settings.',
+        error: true,
+      );
+      return;
+    }
+    try {
+      await labelSerialService.save(
+        settings: result.settings,
+        password: result.password,
+        apiClient: client,
+      );
+      if (!mounted) return;
+      setState(() => labelSerialSettings = result.settings);
+      _showCornerMessage('Next Serial Number: ${result.settings.preview}');
+    } catch (error) {
+      _showCornerMessage(
+        'Serial Number setup was not changed: $error',
+        error: true,
       );
     }
   }
@@ -1221,19 +1384,21 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
       if (!mounted) return null;
       setState(() => activeInwardSession = inwardSession);
     }
-    final id = await productionRepository.capture(
+    final labelSerial = await labelSerialService.claimNext();
+    await productionRepository.capture(
       product: product,
       variant: null,
       computation: computed,
       reading: reading,
       dynamicValues: Map<String, dynamic>.from(dynamicValues),
       inwardSession: inwardSession,
+      labelSerialNumber: labelSerial,
     );
     session.markCaptured(computed.net);
     final recent = await productionRepository.recent(limit: 1);
     final saved = recent.firstOrNull;
     setState(() {
-      lastSavedSerial = saved?.serialNumber ?? id;
+      lastSavedSerial = saved?.labelSerialNumber ?? labelSerial;
       lastSavedBarcode = saved?.barcodeValue ?? lastSavedSerial;
     });
     await _refreshDerived();
@@ -1486,7 +1651,7 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
               productName: product.name,
               variantName: selectedVariant?.name,
               variantCode: selectedVariant?.variantCode,
-              serialNumber: saved.serialNumber,
+              serialNumber: saved.labelSerialNumber ?? '',
               barcodeValue: saved.barcodeValue,
               grossWeight: saved.grossWeight,
               tareWeight: saved.tareWeight,
@@ -1529,7 +1694,7 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
             'product_name': product.name,
             'variant_name': null,
             'batch_number': _batchPrintValue(),
-            'serial_number': saved.serialNumber,
+            'serial_number': saved.labelSerialNumber ?? '',
             'barcode_value': saved.barcodeValue,
             'customer_barcode_enabled':
                 product.raw['customer_barcode_enabled'] ?? false,
@@ -1561,8 +1726,10 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
         printerMessage = result.message ?? result.status;
       });
       if (result.status == 'printed') {
+        setState(() => failedPrintTransaction = null);
         _showPrintSuccess();
       } else {
+        setState(() => failedPrintTransaction = saved);
         _showCornerMessage(
           result.message ?? 'Printer rejected the label.',
           error: true,
@@ -1572,6 +1739,7 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
       if (!mounted) return;
       final stillConnected = await _printerStillConnected();
       setState(() {
+        failedPrintTransaction = saved;
         printerStatus = stillConnected
             ? PrinterConnectionStatus.connected
             : PrinterConnectionStatus.disconnected;
@@ -1927,6 +2095,18 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
                           ),
                         ),
                       ),
+                      if (failedPrintTransaction != null) ...[
+                        const SizedBox(height: 8),
+                        OutlinedButton.icon(
+                          onPressed: () => _printLabel(failedPrintTransaction!),
+                          icon: const Icon(Icons.refresh_rounded),
+                          label: const Text('RETRY LAST PRINT'),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size.fromHeight(58),
+                            foregroundColor: const Color(0xFFB42318),
+                          ),
+                        ),
+                      ],
                       if (AppEdition.qrDiagnostic) ...[
                         const SizedBox(height: 10),
                         _qrDiagnosticButton(),
@@ -2232,6 +2412,18 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
               minimumSize: const Size.fromHeight(62),
             ),
           ),
+          if (failedPrintTransaction != null) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () => _printLabel(failedPrintTransaction!),
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('RETRY LAST PRINT'),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size.fromHeight(52),
+                foregroundColor: const Color(0xFFB42318),
+              ),
+            ),
+          ],
           if (AppEdition.qrDiagnostic) ...[
             const SizedBox(height: 10),
             _qrDiagnosticButton(),
@@ -2337,6 +2529,8 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
           const SizedBox(height: 12),
           _productDropdown(),
           _dynamicDetails(),
+          const SizedBox(height: 12),
+          _labelSerialCard(),
           const SizedBox(height: 22),
           Row(
             children: [
@@ -2392,6 +2586,8 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
         const SizedBox(height: 10),
         _productDropdown(),
         _dynamicDetails(compact: true),
+        const SizedBox(height: 10),
+        _labelSerialCard(compact: true),
         const SizedBox(height: 14),
         Row(
           children: [
@@ -2440,6 +2636,53 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
           'Expand, then tap a dropdown to search and select',
         ),
         children: fields.map((field) => _dynamicField(field)).toList(),
+      ),
+    );
+  }
+
+  Widget _labelSerialCard({bool compact = false}) {
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 12 : 16,
+        vertical: compact ? 10 : 12,
+      ),
+      decoration: BoxDecoration(
+        color: const Color(0xFFEFF6FF),
+        border: Border.all(color: const Color(0xFF93C5FD)),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.confirmation_number_outlined,
+            color: Color(0xFF0B57D0),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'SERIAL NUMBER',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900),
+                ),
+                Text(
+                  'Next: ${labelSerialSettings.preview}',
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: compact ? 15 : 17,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextButton.icon(
+            onPressed: _editLabelSerial,
+            icon: const Icon(Icons.edit_outlined, size: 17),
+            label: const Text('Edit'),
+          ),
+        ],
       ),
     );
   }
@@ -2570,10 +2813,6 @@ class _WeighingDashboardScreenState extends State<WeighingDashboardScreen> {
                       fontWeight: FontWeight.w900,
                     ),
                   ),
-                ),
-                TextButton(
-                  onPressed: () => context.go('/reports'),
-                  child: const Text('VIEW ALL'),
                 ),
               ],
             ),
@@ -3077,7 +3316,9 @@ class _RecentRow extends StatelessWidget {
           Expanded(
             flex: 2,
             child: Text(
-              compact ? '#${row.serialNumber}' : row.serialNumber,
+              compact
+                  ? '#${row.labelSerialNumber ?? '-'}'
+                  : (row.labelSerialNumber ?? '-'),
               maxLines: compact ? 2 : 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontWeight: FontWeight.w700),
@@ -3136,7 +3377,7 @@ class _MobileBottomNav extends StatelessWidget {
       selectedIndex: 0,
       height: 76,
       onDestinationSelected: (index) {
-        final routes = ['/weighing', '/reports', '/products', '/'];
+        final routes = ['/weighing', '/dispatch'];
         context.go(routes[index]);
       },
       destinations: const [
@@ -3146,18 +3387,17 @@ class _MobileBottomNav extends StatelessWidget {
           label: 'Weigh',
         ),
         NavigationDestination(
-          icon: Icon(Icons.history_rounded),
-          label: 'History',
-        ),
-        NavigationDestination(
-          icon: Icon(Icons.inventory_2_outlined),
-          label: 'Products',
-        ),
-        NavigationDestination(
-          icon: Icon(Icons.person_outline),
-          label: 'Profile',
+          icon: Icon(Icons.local_shipping_outlined),
+          label: 'Dispatch',
         ),
       ],
     );
   }
+}
+
+class _SerialEditResult {
+  const _SerialEditResult({required this.settings, required this.password});
+
+  final LabelSerialSettings settings;
+  final String password;
 }

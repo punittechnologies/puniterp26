@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:dio/dio.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/api/api_session.dart';
@@ -31,6 +32,9 @@ class _FoundationScreenState extends State<FoundationScreen> {
   final passwordController = TextEditingController();
   bool syncing = false;
   bool connected = false;
+  bool online = false;
+  DateTime? lastSuccessfulSync;
+  String appVersion = 'Version loading…';
   String apiMessage =
       'Connect to Laravel panel to sync products, customers, labels and pending entries.';
 
@@ -41,7 +45,22 @@ class _FoundationScreenState extends State<FoundationScreen> {
     syncQueue = SyncQueueService(database);
     inventory = InventoryRepository(database);
     stats = _loadStats();
+    _loadAppVersion();
     _loadSession();
+  }
+
+  Future<void> _loadAppVersion() async {
+    try {
+      final package = await PackageInfo.fromPlatform();
+      if (mounted) {
+        setState(
+          () =>
+              appVersion = 'v${package.version} (build ${package.buildNumber})',
+        );
+      }
+    } catch (_) {
+      if (mounted) setState(() => appVersion = 'v1.1.20 (build 25)');
+    }
   }
 
   @override
@@ -57,11 +76,14 @@ class _FoundationScreenState extends State<FoundationScreen> {
     final baseUrl = await ApiSession.baseUrl();
     final email = await ApiSession.email();
     final token = await ApiSession.token();
+    final savedLastSync = await ApiSession.lastSuccessfulSync();
     if (!mounted) return;
     setState(() {
       baseUrlController.text = baseUrl;
       if (email != null) emailController.text = email;
       connected = token != null;
+      online = false;
+      lastSuccessfulSync = savedLastSync;
       apiMessage = connected
           ? 'Connected. Ready to sync with Laravel panel.'
           : apiMessage;
@@ -115,6 +137,7 @@ class _FoundationScreenState extends State<FoundationScreen> {
     if (!mounted) return;
     setState(() {
       connected = false;
+      online = false;
       emailController.clear();
       passwordController.clear();
       apiMessage = 'Logged out. Enter your app user ID and password.';
@@ -145,8 +168,11 @@ class _FoundationScreenState extends State<FoundationScreen> {
         ).clearLocalAccountState(allAccounts: true);
       }
       await _syncWithClient(client);
+      final syncedAt = await ApiSession.recordSuccessfulSync();
       setState(() {
         connected = true;
+        online = true;
+        lastSuccessfulSync = syncedAt;
         apiMessage =
             'Connected. Auto-sync is now running continuously in the background.';
         stats = _loadStats();
@@ -154,6 +180,7 @@ class _FoundationScreenState extends State<FoundationScreen> {
     } catch (error) {
       setState(() {
         connected = false;
+        online = false;
         apiMessage = _friendlyApiError(error);
       });
     } finally {
@@ -170,15 +197,19 @@ class _FoundationScreenState extends State<FoundationScreen> {
     });
     try {
       await _syncWithClient(client);
+      final syncedAt = await ApiSession.recordSuccessfulSync();
       if (!mounted) return;
       setState(() {
         connected = true;
+        online = true;
+        lastSuccessfulSync = syncedAt;
         apiMessage = 'Auto-sync refreshed live products, labels and customers.';
         stats = _loadStats();
       });
     } catch (error) {
       if (!mounted) return;
       setState(() {
+        online = false;
         apiMessage = 'Using offline data. ${_friendlyApiError(error)}';
       });
     } finally {
@@ -271,16 +302,14 @@ class _FoundationScreenState extends State<FoundationScreen> {
                             ),
                             if (connected) ...[
                               const SizedBox(height: 16),
-                              _MetricWrap(value: value, compact: true),
-                              const SizedBox(height: 16),
-                              _ModuleGrid(compact: true),
-                              const SizedBox(height: 16),
-                              SizedBox(
-                                height: 360,
-                                child: _StatusPanel(
-                                  pendingSync: value.pendingSync,
-                                ),
+                              _OperatorStatus(
+                                online: online,
+                                pendingSync: value.pendingSync,
+                                lastSync: lastSuccessfulSync,
+                                appVersion: appVersion,
                               ),
+                              const SizedBox(height: 14),
+                              _ModuleGrid(compact: true),
                             ],
                           ],
                         )
@@ -310,8 +339,13 @@ class _FoundationScreenState extends State<FoundationScreen> {
                                       child: SingleChildScrollView(
                                         child: Column(
                                           children: [
-                                            _MetricWrap(value: value),
-                                            const SizedBox(height: 24),
+                                            _OperatorStatus(
+                                              online: online,
+                                              pendingSync: value.pendingSync,
+                                              lastSync: lastSuccessfulSync,
+                                              appVersion: appVersion,
+                                            ),
+                                            const SizedBox(height: 20),
                                             const _ModuleGrid(),
                                           ],
                                         ),
@@ -321,21 +355,13 @@ class _FoundationScreenState extends State<FoundationScreen> {
                                     const Expanded(
                                       child: Center(
                                         child: Text(
-                                          'Login to start weighing, inventory and dispatch.',
+                                          'Login to start weighing and dispatch.',
                                         ),
                                       ),
                                     ),
                                 ],
                               ),
                             ),
-                            const SizedBox(width: 24),
-                            if (connected)
-                              Expanded(
-                                flex: 2,
-                                child: _StatusPanel(
-                                  pendingSync: value.pendingSync,
-                                ),
-                              ),
                           ],
                         ),
                 );
@@ -412,60 +438,6 @@ class _Header extends StatelessWidget {
   }
 }
 
-class _MetricWrap extends StatelessWidget {
-  const _MetricWrap({required this.value, this.compact = false});
-
-  final _DashboardStats value;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 14,
-      runSpacing: 14,
-      children: [
-        _MetricCard(
-          label: 'Products cached',
-          value: '${value.productCount}',
-          icon: Icons.inventory_2_outlined,
-          compact: compact,
-        ),
-        _MetricCard(
-          label: 'Production entries',
-          value: '${value.productionCount}',
-          icon: Icons.scale_outlined,
-          compact: compact,
-        ),
-        _MetricCard(
-          label: 'Net inventory kg',
-          value: value.netWeight.toStringAsFixed(3),
-          icon: Icons.warehouse_outlined,
-          compact: compact,
-        ),
-        _MetricCard(
-          label: 'Net pieces',
-          value: value.netPieces.toStringAsFixed(0),
-          icon: Icons.tag_outlined,
-          compact: compact,
-        ),
-        _MetricCard(
-          label: 'Dispatches',
-          value: '${value.dispatchCount}',
-          icon: Icons.local_shipping_outlined,
-          compact: compact,
-        ),
-        _MetricCard(
-          label: 'Pending sync',
-          value: '${value.pendingSync}',
-          icon: Icons.cloud_sync_outlined,
-          alert: value.pendingSync > 0,
-          compact: compact,
-        ),
-      ],
-    );
-  }
-}
-
 class _ModuleGrid extends StatelessWidget {
   const _ModuleGrid({this.compact = false});
 
@@ -476,7 +448,7 @@ class _ModuleGrid extends StatelessWidget {
     return GridView.count(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      crossAxisCount: compact ? 1 : 3,
+      crossAxisCount: compact ? 1 : 2,
       mainAxisSpacing: 14,
       crossAxisSpacing: 14,
       childAspectRatio: compact ? 2.35 : 1.7,
@@ -489,42 +461,58 @@ class _ModuleGrid extends StatelessWidget {
           primary: true,
         ),
         _ModuleTile(
-          title: 'Scale Settings',
-          subtitle: 'Pair, connect and diagnose SPP scale',
-          route: '/settings',
-          icon: Icons.bluetooth_connected,
-        ),
-        _ModuleTile(
-          title: 'Printer Settings',
-          subtitle: 'List, connect and test thermal printer',
-          route: '/printer-settings',
-          icon: Icons.print_outlined,
-        ),
-        _ModuleTile(
-          title: 'Products',
-          subtitle: 'Cached product and variant config',
-          route: '/products',
-          icon: Icons.category_outlined,
-        ),
-        _ModuleTile(
-          title: 'Inventory',
-          subtitle: 'Ledger and current balance',
-          route: '/inventory',
-          icon: Icons.account_balance_outlined,
-        ),
-        _ModuleTile(
           title: 'Dispatch',
           subtitle: 'Scan, validate and deduct stock',
           route: '/dispatch',
           icon: Icons.document_scanner_outlined,
         ),
-        _ModuleTile(
-          title: 'Reports',
-          subtitle: 'Production, inventory and sync views',
-          route: '/reports',
-          icon: Icons.bar_chart_outlined,
-        ),
       ],
+    );
+  }
+}
+
+class _OperatorStatus extends StatelessWidget {
+  const _OperatorStatus({
+    required this.online,
+    required this.pendingSync,
+    required this.lastSync,
+    required this.appVersion,
+  });
+
+  final bool online;
+  final int pendingSync;
+  final DateTime? lastSync;
+  final String appVersion;
+
+  @override
+  Widget build(BuildContext context) {
+    final syncText = lastSync == null
+        ? 'Not synced yet'
+        : '${lastSync!.hour.toString().padLeft(2, '0')}:${lastSync!.minute.toString().padLeft(2, '0')}';
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFD6E0EF)),
+      ),
+      child: Wrap(
+        spacing: 18,
+        runSpacing: 8,
+        children: [
+          Text(
+            online ? '● Online' : '● Offline',
+            style: TextStyle(
+              color: online ? const Color(0xFF087A4A) : const Color(0xFFB42318),
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          Text('Pending Sync: $pendingSync'),
+          Text('Last Sync: $syncText'),
+          Text(appVersion),
+        ],
+      ),
     );
   }
 }
@@ -671,63 +659,6 @@ class _ApiSyncCard extends StatelessWidget {
   }
 }
 
-class _MetricCard extends StatelessWidget {
-  const _MetricCard({
-    required this.label,
-    required this.value,
-    required this.icon,
-    this.alert = false,
-    this.compact = false,
-  });
-
-  final String label;
-  final String value;
-  final IconData icon;
-  final bool alert;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: compact ? double.infinity : 210,
-      padding: EdgeInsets.all(compact ? 14 : 18),
-      decoration: BoxDecoration(
-        color: alert ? const Color(0xFFFFFBEB) : Colors.white,
-        border: Border.all(
-          color: alert ? const Color(0xFFF59E0B) : const Color(0xFFDCE8F7),
-        ),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            icon,
-            color: alert ? const Color(0xFFB45309) : const Color(0xFF0B63CE),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(label, style: Theme.of(context).textTheme.labelLarge),
-                const SizedBox(height: 4),
-                Text(
-                  value,
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    fontSize: compact ? 22 : null,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _ModuleTile extends StatelessWidget {
   const _ModuleTile({
     required this.title,
@@ -794,107 +725,6 @@ class _ModuleTile extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _StatusPanel extends StatelessWidget {
-  const _StatusPanel({required this.pendingSync});
-
-  final int pendingSync;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: const Color(0xFFDCE8F7)),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'System Status',
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 20),
-            const _StatusRow(
-              label: 'Bluetooth scale',
-              value: 'Classic SPP ready',
-            ),
-            const _StatusRow(label: 'Offline mode', value: 'Enabled'),
-            _StatusRow(
-              label: 'Cloud sync',
-              value: pendingSync == 0 ? 'Clear' : '$pendingSync pending',
-              warning: pendingSync > 0,
-            ),
-            const _StatusRow(
-              label: 'Printer',
-              value: 'Bluetooth thermal ready',
-            ),
-            const SizedBox(height: 24),
-            FilledButton.icon(
-              onPressed: () => context.go('/weighing'),
-              icon: const Icon(Icons.monitor_weight_outlined),
-              label: const Text('Start Weighing'),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: () => context.go('/settings'),
-              icon: const Icon(Icons.bluetooth_searching),
-              label: const Text('Connect Scale'),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: () => context.go('/printer-settings'),
-              icon: const Icon(Icons.print_outlined),
-              label: const Text('Connect Printer'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _StatusRow extends StatelessWidget {
-  const _StatusRow({
-    required this.label,
-    required this.value,
-    this.warning = false,
-  });
-
-  final String label;
-  final String value;
-  final bool warning;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Row(
-        children: [
-          Icon(
-            warning ? Icons.warning_amber_rounded : Icons.check_circle_outline,
-            color: warning ? const Color(0xFFD97706) : const Color(0xFF0B63CE),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label, style: Theme.of(context).textTheme.labelLarge),
-                Text(value, style: const TextStyle(color: Color(0xFF475569))),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }
