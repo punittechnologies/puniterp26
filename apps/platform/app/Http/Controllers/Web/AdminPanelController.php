@@ -1453,6 +1453,8 @@ class AdminPanelController extends Controller
             'settings.reportColumns.inward.*' => ['string', 'max:100'],
             'settings.reportColumns.dispatch' => ['nullable', 'array'],
             'settings.reportColumns.dispatch.*' => ['string', 'max:100'],
+            'settings.reportColumns.stock' => ['nullable', 'array'],
+            'settings.reportColumns.stock.*' => ['string', 'max:100'],
             'settings.reportSummary.inward.enabled' => ['nullable', 'boolean'],
             'settings.reportSummary.inward.groupBy' => ['nullable', 'array', 'max:11'],
             'settings.reportSummary.inward.groupBy.*' => ['string', 'max:100'],
@@ -2735,15 +2737,43 @@ class AdminPanelController extends Controller
 
     private function xlsxWorkbook(string $sheetName, array $rows): string
     {
+        return $this->xlsxWorkbookSheets([$sheetName => $rows]);
+    }
+
+    private function xlsxWorkbookSheets(array $sheets): string
+    {
+        $sheets = collect($sheets)
+            ->mapWithKeys(function ($rows, $name): array {
+                $name = preg_replace('/[\\[\\]*\\/:?\\\\]/', ' ', (string) $name) ?: 'Sheet';
+
+                return [mb_substr($name, 0, 31) => is_array($rows) ? $rows : []];
+            })
+            ->all();
+        if ($sheets === []) {
+            $sheets = ['Sheet' => []];
+        }
+
         $tmp = tempnam(sys_get_temp_dir(), 'xlsx_');
         $zip = new \ZipArchive;
         $zip->open($tmp, \ZipArchive::OVERWRITE);
-        $zip->addFromString('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>');
+        $worksheetTypes = collect(array_keys($sheets))
+            ->map(fn ($name, $index) => '<Override PartName="/xl/worksheets/sheet'.($index + 1).'.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>')
+            ->implode('');
+        $zip->addFromString('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'.$worksheetTypes.'<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>');
         $zip->addFromString('_rels/.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>');
-        $zip->addFromString('xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>');
-        $zip->addFromString('xl/workbook.xml', '<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="'.$this->xmlEscape(mb_substr($sheetName, 0, 31)).'" sheetId="1" r:id="rId1"/></sheets></workbook>');
+        $relationships = collect(array_keys($sheets))
+            ->map(fn ($name, $index) => '<Relationship Id="rId'.($index + 1).'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet'.($index + 1).'.xml"/>')
+            ->implode('');
+        $styleRelationship = '<Relationship Id="rId'.(count($sheets) + 1).'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>';
+        $zip->addFromString('xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'.$relationships.$styleRelationship.'</Relationships>');
+        $sheetDefinitions = collect(array_keys($sheets))
+            ->map(fn ($name, $index) => '<sheet name="'.$this->xmlEscape($name).'" sheetId="'.($index + 1).'" r:id="rId'.($index + 1).'"/>')
+            ->implode('');
+        $zip->addFromString('xl/workbook.xml', '<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'.$sheetDefinitions.'</sheets></workbook>');
         $zip->addFromString('xl/styles.xml', '<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="1"><fill><patternFill patternType="none"/></fill></fills><borders count="1"><border/></borders><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellXfs></styleSheet>');
-        $zip->addFromString('xl/worksheets/sheet1.xml', $this->worksheetXml($rows));
+        foreach (array_values($sheets) as $index => $rows) {
+            $zip->addFromString('xl/worksheets/sheet'.($index + 1).'.xml', $this->worksheetXml($rows));
+        }
         $zip->close();
         $content = file_get_contents($tmp);
         unlink($tmp);
@@ -2757,13 +2787,24 @@ class AdminPanelController extends Controller
         foreach ($rows as $rowIndex => $row) {
             $xml .= '<row r="'.($rowIndex + 1).'">';
             foreach (array_values($row) as $columnIndex => $value) {
-                $cell = chr(65 + $columnIndex).($rowIndex + 1);
+                $cell = $this->xlsxColumnName($columnIndex).($rowIndex + 1);
                 $xml .= '<c r="'.$cell.'" t="inlineStr"><is><t>'.$this->xmlEscape((string) $value).'</t></is></c>';
             }
             $xml .= '</row>';
         }
 
         return $xml.'</sheetData></worksheet>';
+    }
+
+    private function xlsxColumnName(int $index): string
+    {
+        $name = '';
+        do {
+            $name = chr(65 + ($index % 26)).$name;
+            $index = intdiv($index, 26) - 1;
+        } while ($index >= 0);
+
+        return $name;
     }
 
     private function xmlEscape(string $value): string

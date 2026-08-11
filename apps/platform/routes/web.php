@@ -159,6 +159,7 @@ Route::middleware('auth')->group(function (): void {
     Route::post('/production/{production}/cancel', [AdminPanelController::class, 'productionCancel'])->name('admin.production.cancel');
     Route::get('/inventory', [AdminPanelController::class, 'inventory'])->name('admin.inventory');
     Route::get('/inventory/closing-stock/export', [AdminPanelController::class, 'closingStockExport'])->name('admin.inventory.closing-stock.export');
+    Route::get('/inventory/current-stock/export', [AdminPanelController::class, 'currentStockExport'])->name('admin.inventory.current-stock.export');
     Route::post('/inventory/adjust', [AdminPanelController::class, 'inventoryAdjust'])->name('admin.inventory.adjust');
     Route::delete('/inventory/clear', [AdminPanelController::class, 'inventoryClear'])->name('admin.inventory.clear');
     Route::get('/customers', [AdminPanelController::class, 'customers'])->name('admin.customers');
