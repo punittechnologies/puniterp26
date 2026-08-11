@@ -7,6 +7,7 @@ use App\Models\ProductConfiguration\DynamicFieldDefinition;
 use App\Models\ProductConfiguration\Product;
 use App\Models\ProductConfiguration\ProductVariant;
 use App\Models\ProductConfiguration\Unit;
+use App\Models\ProductionTransaction;
 use App\Support\ProductCustomerBarcode;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\View\View;
@@ -439,6 +440,225 @@ trait AdminDataExchange
             'Content-Disposition' => 'attachment; filename="'.$baseName.'.xlsx"',
             'X-Content-Type-Options' => 'nosniff',
         ]);
+    }
+
+    public function currentStockExport(Request $request)
+    {
+        abort_unless(
+            Auth::user()?->hasPermission('inventory.view') || Auth::user()?->hasPermission('reports.view'),
+            403,
+        );
+        $tenantId = $this->tenantId();
+        $data = [
+            ...$this->operationalReportFilters($request, $tenantId),
+            ...$request->validate([
+                'stock_date' => ['required', 'date'],
+                'format' => ['required', Rule::in(['xlsx', 'pdf'])],
+            ]),
+        ];
+        $asOf = CarbonImmutable::parse($data['stock_date'])->endOfDay();
+        $query = InventoryTransaction::query()
+            ->where('tenant_id', $tenantId)
+            ->where('occurred_at', '<=', $asOf);
+
+        // Apply identity/detail filters to the movements, then calculate the balance.
+        // Movement type and raw movement quantities must not filter the balance itself.
+        $balanceFilters = [
+            ...$data,
+            'transaction_type' => '',
+            'weight_min' => '',
+            'weight_max' => '',
+            'pieces_min' => '',
+            'pieces_max' => '',
+        ];
+        $this->applyInventoryFilters($query, $balanceFilters, $tenantId);
+        $query
+            ->when($data['serial'], fn ($query, $serial) => $query->where('label_serial_number', 'like', '%'.$serial.'%'))
+            ->when($data['barcode'], fn ($query, $barcode) => $query->where('barcode_value', 'like', '%'.$barcode.'%'));
+
+        $weightExpression = $this->inventoryWeightExpression();
+        $pieceExpression = $this->inventoryPieceExpression();
+        $query
+            ->select('product_id', 'variant_id', 'label_serial_number', 'barcode_value')
+            ->selectRaw($weightExpression.' as weight')
+            ->selectRaw($pieceExpression.' as pieces')
+            ->selectRaw('max(occurred_at) as last_movement')
+            ->groupBy('product_id', 'variant_id', 'label_serial_number', 'barcode_value')
+            ->havingRaw('('.$weightExpression.') > 0.000001 OR ('.$pieceExpression.') > 0.000001')
+            ->when($data['weight_min'] !== '', fn ($query) => $query->havingRaw('('.$weightExpression.') >= ?', [(float) $data['weight_min']]))
+            ->when($data['weight_max'] !== '', fn ($query) => $query->havingRaw('('.$weightExpression.') <= ?', [(float) $data['weight_max']]))
+            ->when($data['pieces_min'] !== '', fn ($query) => $query->havingRaw('('.$pieceExpression.') >= ?', [(float) $data['pieces_min']]))
+            ->when($data['pieces_max'] !== '', fn ($query) => $query->havingRaw('('.$pieceExpression.') <= ?', [(float) $data['pieces_max']]))
+            ->orderBy('product_id')
+            ->orderBy('variant_id')
+            ->orderBy('label_serial_number');
+
+        $balances = $query->get();
+        $productNames = Product::query()->where('tenant_id', $tenantId)->pluck('name', 'id');
+        $variants = ProductVariant::query()
+            ->where('tenant_id', $tenantId)
+            ->get(['id', 'name', 'metadata'])
+            ->keyBy('id');
+        $productions = $balances->isEmpty()
+            ? collect()
+            : ProductionTransaction::query()
+                ->where('tenant_id', $tenantId)
+                ->where('captured_at', '<=', $asOf)
+                ->where(function ($query) use ($balances): void {
+                    $barcodes = $balances->pluck('barcode_value')->filter()->unique()->values();
+                    $serials = $balances->pluck('label_serial_number')->filter()->unique()->values();
+                    $query->when($barcodes->isNotEmpty(), fn ($query) => $query->whereIn('barcode_value', $barcodes))
+                        ->when($serials->isNotEmpty(), fn ($query) => $query->orWhereIn('label_serial_number', $serials));
+                })
+                ->latest('captured_at')
+                ->get(['product_id', 'variant_id', 'label_serial_number', 'barcode_value', 'dynamic_values', 'captured_at']);
+        $productionByBarcode = $productions->filter->barcode_value->unique('barcode_value')->keyBy('barcode_value');
+        $productionBySerial = $productions->filter->label_serial_number->unique('label_serial_number')->keyBy('label_serial_number');
+        $dynamicColumns = DynamicFieldDefinition::query()
+            ->where('tenant_id', $tenantId)
+            ->where('entity_type', 'product_variant')
+            ->where('is_active', true)
+            ->orderBy('sort_order')
+            ->pluck('field_label', 'internal_key');
+
+        $rows = $balances->map(function ($balance) use ($productNames, $variants, $productionByBarcode, $productionBySerial, $dynamicColumns): array {
+            $variant = $variants->get($balance->variant_id);
+            $production = $productionByBarcode->get($balance->barcode_value)
+                ?? $productionBySerial->get($balance->label_serial_number);
+            $dynamicValues = collect($variant?->metadata['dynamic_fields'] ?? [])
+                ->merge($production?->dynamic_values ?? []);
+            $serial = trim((string) $balance->label_serial_number);
+            $barcode = trim((string) $balance->barcode_value);
+            $row = [
+                'product_name' => $productNames[$balance->product_id] ?? 'Unknown product',
+                'product_detail' => $variant?->name ?? 'Base product',
+                'serial_number' => $serial !== '' ? $serial : 'Not assigned',
+                'barcode_value' => $barcode !== '' ? $barcode : 'Not assigned',
+                'net_weight' => number_format((float) $balance->weight, 3, '.', ''),
+                'pieces' => number_format((float) $balance->pieces, 0, '.', ''),
+                'stock_entry' => $production?->captured_at?->format('Y-m-d H:i') ?? 'Not assigned',
+                'last_movement' => CarbonImmutable::parse($balance->last_movement)->format('Y-m-d H:i'),
+                'status' => $serial !== '' ? 'Available' : 'Manual / Opening stock',
+            ];
+            foreach ($dynamicColumns as $key => $label) {
+                $value = $dynamicValues->get($key);
+                $row[$key] = is_array($value) ? implode(', ', $value) : ((string) $value ?: '-');
+            }
+
+            return $row;
+        });
+        $columns = $this->currentStockColumns($dynamicColumns->all());
+        $summaryRows = $rows
+            ->groupBy(fn ($row) => collect(['product_name', 'product_detail', ...array_keys($dynamicColumns->all())])
+                ->map(fn ($key) => (string) ($row[$key] ?? '-'))
+                ->implode('|'))
+            ->map(function ($group) use ($dynamicColumns): array {
+                $first = $group->first();
+
+                return [
+                    'product_name' => $first['product_name'],
+                    'product_detail' => $first['product_detail'],
+                    ...collect(array_keys($dynamicColumns->all()))->mapWithKeys(fn ($key) => [$key => $first[$key] ?? '-'])->all(),
+                    'serials' => $group->where('serial_number', '!=', 'Not assigned')->count(),
+                    'net_weight' => number_format($group->sum(fn ($row) => (float) $row['net_weight']), 3, '.', ''),
+                    'pieces' => number_format($group->sum(fn ($row) => (float) $row['pieces']), 0, '.', ''),
+                ];
+            })
+            ->sortBy('product_name')
+            ->values();
+        $totalWeight = $rows->sum(fn ($row) => (float) $row['net_weight']);
+        $totalPieces = $rows->sum(fn ($row) => (float) $row['pieces']);
+        $serialCount = $rows->where('serial_number', '!=', 'Not assigned')->count();
+        $summaryColumns = [
+            'product_name' => 'Product',
+            'product_detail' => 'Product Detail',
+            ...$dynamicColumns->all(),
+            'serials' => 'Serials',
+            'net_weight' => 'Net Stock kg',
+            'pieces' => 'PCS',
+        ];
+        $baseName = 'current-stock-'.$asOf->format('Ymd');
+
+        if ($data['format'] === 'pdf') {
+            $pdfRows = collect([
+                ['section' => 'AS OF', 'details' => $asOf->format('Y-m-d H:i'), 'weight' => '', 'pieces' => '', 'serials' => ''],
+                ['section' => 'TOTAL', 'details' => 'Available current stock', 'weight' => number_format($totalWeight, 3), 'pieces' => number_format($totalPieces, 0), 'serials' => $serialCount],
+                ...$summaryRows->map(fn ($row) => [
+                    'section' => 'SUMMARY',
+                    'details' => collect(array_keys($summaryColumns))->reject(fn ($key) => in_array($key, ['net_weight', 'pieces', 'serials'], true))->map(fn ($key) => $row[$key] ?? '-')->implode(' / '),
+                    'weight' => $row['net_weight'],
+                    'pieces' => $row['pieces'],
+                    'serials' => $row['serials'],
+                ])->all(),
+                ...$rows->map(fn ($row) => [
+                    'section' => 'STOCK',
+                    'details' => collect(array_keys($columns))->map(fn ($key) => ($columns[$key] ?? $key).': '.($row[$key] ?? '-'))->implode(' / '),
+                    'weight' => $row['net_weight'],
+                    'pieces' => $row['pieces'],
+                    'serials' => $row['serial_number'],
+                ])->all(),
+            ]);
+
+            return response($this->basicPdf('Current Stock', ['section', 'serials', 'weight', 'pieces', 'details'], $pdfRows), 200, [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => 'attachment; filename="'.$baseName.'.pdf"',
+                'X-Content-Type-Options' => 'nosniff',
+            ]);
+        }
+
+        $summarySheet = [
+            ['Current Stock Report'],
+            ['As of', $asOf->format('Y-m-d H:i')],
+            ['Generated at', now()->format('Y-m-d H:i')],
+            ['Total Net Stock kg', number_format($totalWeight, 3, '.', '')],
+            ['Total PCS', number_format($totalPieces, 0, '.', '')],
+            ['Available Customer Serials', (string) $serialCount],
+            [],
+            array_values($summaryColumns),
+            ...$summaryRows->map(fn ($row) => collect(array_keys($summaryColumns))->map(fn ($key) => $row[$key] ?? '-')->all())->all(),
+        ];
+        $serialSheet = [
+            ['Current Stock Serial Report'],
+            ['As of', $asOf->format('Y-m-d H:i')],
+            [],
+            array_values($columns),
+            ...$rows->map(fn ($row) => collect(array_keys($columns))->map(fn ($key) => $row[$key] ?? '-')->all())->all(),
+        ];
+
+        return response($this->xlsxWorkbookSheets([
+            'Stock Summary' => $summarySheet,
+            'Serial Stock' => $serialSheet,
+        ]), 200, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => 'attachment; filename="'.$baseName.'.xlsx"',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
+    private function currentStockColumns(array $dynamicColumns): array
+    {
+        $available = [
+            'product_name' => 'Product',
+            'product_detail' => 'Product Detail',
+            ...$dynamicColumns,
+            'serial_number' => 'Serial Number',
+            'barcode_value' => 'Barcode',
+            'net_weight' => 'Net Stock kg',
+            'pieces' => 'PCS',
+            'stock_entry' => 'Stock Entry',
+            'last_movement' => 'Last Movement',
+            'status' => 'Status',
+        ];
+        $configured = data_get(Auth::user()?->tenant?->settings ?? [], 'reportColumns.stock', []);
+        if (! is_array($configured) || $configured === []) {
+            return $available;
+        }
+        $selected = collect($configured)
+            ->filter(fn ($key) => array_key_exists($key, $available))
+            ->mapWithKeys(fn ($key) => [$key => $available[$key]])
+            ->all();
+
+        return $selected === [] ? $available : $selected;
     }
 
     private function buildProductPreview(array $headers, array $rows): array

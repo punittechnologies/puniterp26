@@ -6,15 +6,17 @@
     @php($inwardColumns = array_merge($baseColumns, ['captured_at' => 'Time']))
     @php($dispatchColumns = $baseColumns)
     @php($dynamicColumns = $productFields->pluck('field_label', 'internal_key')->all())
+    @php($stockColumns = ['product_name' => 'Product', 'product_detail' => 'Product Detail', ...$dynamicColumns, 'serial_number' => 'Serial Number', 'barcode_value' => 'Barcode', 'net_weight' => 'Net Stock kg', 'pieces' => 'PCS', 'stock_entry' => 'Stock Entry', 'last_movement' => 'Last Movement', 'status' => 'Status'])
     @php($inwardSelected = old('settings.reportColumns.inward', data_get($settings, 'reportColumns.inward', array_keys(array_merge($inwardColumns, $dynamicColumns)))))
     @php($dispatchSelected = old('settings.reportColumns.dispatch', data_get($settings, 'reportColumns.dispatch', array_keys(array_merge($dispatchColumns, $dynamicColumns)))))
+    @php($stockSelected = old('settings.reportColumns.stock', data_get($settings, 'reportColumns.stock', array_keys($stockColumns))))
     @php($summaryMetrics = ['sticker_pcs' => 'Sticker PCS', 'gross_kg' => 'Gross kg', 'tare_kg' => 'Tare kg', 'net_kg' => 'Net kg', 'converted_pcs' => 'Converted PCS'])
     <form class="card form-grid" method="POST" action="{{ route('admin.tenant-settings.save') }}" enctype="multipart/form-data">
         @csrf
         <div class="card-head full">
             <div>
                 <h2>Report Customiser</h2>
-                <p>Set company details, report footer and fixed PDF / Excel columns for inward and dispatch reports.</p>
+                <p>Set company details, report footer and fixed PDF / Excel columns for inward, dispatch and current stock reports.</p>
             </div>
             <button class="btn primary">Save settings</button>
         </div>
@@ -81,6 +83,16 @@
             <div class="checkbox-grid">
                 @foreach(array_merge($dispatchColumns, $dynamicColumns) as $key => $label)
                     <label><input type="checkbox" name="settings[reportColumns][dispatch][]" value="{{ $key }}" @checked(in_array($key, $dispatchSelected ?? [], true))> {{ $label }}</label>
+                @endforeach
+            </div>
+        </div>
+
+        <div class="full card subtle">
+            <h3>Current Stock Report Columns</h3>
+            <p class="muted">Choose the columns shown on the serial-level Current Stock PDF and Excel sheet. Hidden internal serial numbers are never exported.</p>
+            <div class="checkbox-grid">
+                @foreach($stockColumns as $key => $label)
+                    <label><input type="checkbox" name="settings[reportColumns][stock][]" value="{{ $key }}" @checked(in_array($key, $stockSelected ?? [], true))> {{ $label }}</label>
                 @endforeach
             </div>
         </div>

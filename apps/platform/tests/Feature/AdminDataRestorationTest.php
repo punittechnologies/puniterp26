@@ -43,6 +43,7 @@ class AdminDataRestorationTest extends TestCase
         $this->actingAs($admin)->get('/inventory')
             ->assertOk()
             ->assertSee('Inventory Filters')
+            ->assertSee('Current Stock Report')
             ->assertSee('Closing Stock');
         $this->actingAs($admin)->get('/admin/roles')
             ->assertOk()
@@ -378,6 +379,156 @@ class AdminDataRestorationTest extends TestCase
             ->assertSee('name="product_ids[]"', false)
             ->assertSee('Matching Product')
             ->assertDontSee('OTHER-BC');
+    }
+
+    public function test_current_stock_export_contains_available_customer_serials_dynamic_details_and_two_excel_sheets(): void
+    {
+        [$tenant, $admin] = $this->adminUser();
+        $product = $this->product($tenant, 'Stock Export Product', 'STOCK-EXPORT');
+        DynamicFieldDefinition::query()->create([
+            'tenant_id' => $tenant->id,
+            'field_label' => 'Color',
+            'internal_key' => 'color',
+            'entity_type' => 'product_variant',
+            'data_type' => 'dropdown',
+            'dropdown_options' => [['label' => 'Blue', 'value' => 'blue']],
+            'is_active' => true,
+        ]);
+        $variant = ProductVariant::query()->create([
+            'tenant_id' => $tenant->id,
+            'product_id' => $product->id,
+            'name' => 'Blue Detail',
+            'variant_code' => 'BLUE-STOCK',
+            'metadata' => ['dynamic_fields' => ['color' => 'blue']],
+            'is_active' => true,
+        ]);
+        $production = ProductionTransaction::query()->create([
+            'tenant_id' => $tenant->id,
+            'product_id' => $product->id,
+            'variant_id' => $variant->id,
+            'serial_number' => 'INTERNAL-SECRET-100',
+            'label_serial_number' => 'CUSTOMER-SERIAL-100',
+            'barcode_value' => 'STOCK-BARCODE-100',
+            'product_snapshot' => ['name' => $product->name],
+            'dynamic_values' => ['color' => 'blue'],
+            'gross_weight' => 5,
+            'tare_weight' => 0,
+            'net_weight' => 5,
+            'piece_quantity' => 2,
+            'captured_at' => now(),
+        ]);
+        InventoryTransaction::query()->create([
+            'tenant_id' => $tenant->id,
+            'product_id' => $product->id,
+            'variant_id' => $variant->id,
+            'serial_number' => $production->serial_number,
+            'label_serial_number' => $production->label_serial_number,
+            'barcode_value' => $production->barcode_value,
+            'transaction_type' => 'production_addition',
+            'weight_quantity' => 5,
+            'piece_quantity' => 2,
+            'reference_type' => 'production',
+            'reference_id' => $production->id,
+            'occurred_at' => now(),
+        ]);
+
+        $otherTenant = Tenant::query()->create([
+            'name' => 'Hidden Stock Tenant',
+            'code' => 'HIDDEN-STOCK',
+            'status' => 'active',
+        ]);
+        $hiddenProduct = $this->product($otherTenant, 'Hidden Stock Product', 'HIDDEN-STOCK');
+        InventoryTransaction::query()->create([
+            'tenant_id' => $otherTenant->id,
+            'product_id' => $hiddenProduct->id,
+            'label_serial_number' => 'OTHER-TENANT-SERIAL',
+            'barcode_value' => 'OTHER-TENANT-BARCODE',
+            'transaction_type' => 'opening_stock',
+            'weight_quantity' => 999,
+            'piece_quantity' => 999,
+            'reference_type' => 'test',
+            'reference_id' => (string) Str::uuid(),
+            'occurred_at' => now(),
+        ]);
+
+        $dispatched = ProductionTransaction::query()->create([
+            'tenant_id' => $tenant->id,
+            'product_id' => $product->id,
+            'variant_id' => $variant->id,
+            'serial_number' => 'INTERNAL-DISPATCHED',
+            'label_serial_number' => 'CUSTOMER-DISPATCHED',
+            'barcode_value' => 'STOCK-BARCODE-DISPATCHED',
+            'product_snapshot' => ['name' => $product->name],
+            'dynamic_values' => ['color' => 'blue'],
+            'gross_weight' => 3,
+            'tare_weight' => 0,
+            'net_weight' => 3,
+            'piece_quantity' => 1,
+            'captured_at' => now(),
+        ]);
+        foreach (['production_addition', 'dispatch_deduction'] as $type) {
+            InventoryTransaction::query()->create([
+                'tenant_id' => $tenant->id,
+                'product_id' => $product->id,
+                'variant_id' => $variant->id,
+                'serial_number' => $dispatched->serial_number,
+                'label_serial_number' => $dispatched->label_serial_number,
+                'barcode_value' => $dispatched->barcode_value,
+                'transaction_type' => $type,
+                'weight_quantity' => 3,
+                'piece_quantity' => 1,
+                'reference_type' => 'test',
+                'reference_id' => (string) Str::uuid(),
+                'occurred_at' => now(),
+            ]);
+        }
+        InventoryTransaction::query()->create([
+            'tenant_id' => $tenant->id,
+            'product_id' => $product->id,
+            'transaction_type' => 'opening_stock',
+            'weight_quantity' => 1.25,
+            'piece_quantity' => 4,
+            'reference_type' => 'manual',
+            'reference_id' => (string) Str::uuid(),
+            'occurred_at' => now(),
+        ]);
+
+        $query = http_build_query([
+            'stock_date' => now()->toDateString(),
+            'format' => 'xlsx',
+            'product_ids' => [$product->id],
+        ]);
+        $response = $this->actingAs($admin)->get('/inventory/current-stock/export?'.$query);
+        $response->assertOk()->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        $tmp = tempnam(sys_get_temp_dir(), 'stock_test_');
+        file_put_contents($tmp, $response->getContent());
+        $zip = new \ZipArchive;
+        $this->assertTrue($zip->open($tmp) === true);
+        $workbook = $zip->getFromName('xl/workbook.xml');
+        $summarySheet = $zip->getFromName('xl/worksheets/sheet1.xml');
+        $serialSheet = $zip->getFromName('xl/worksheets/sheet2.xml');
+        $zip->close();
+        unlink($tmp);
+
+        $this->assertStringContainsString('Stock Summary', $workbook);
+        $this->assertStringContainsString('Serial Stock', $workbook);
+        $this->assertStringContainsString('6.250', $summarySheet);
+        $this->assertStringContainsString('CUSTOMER-SERIAL-100', $serialSheet);
+        $this->assertStringContainsString('blue', $serialSheet);
+        $this->assertStringContainsString('Not assigned', $serialSheet);
+        $this->assertStringNotContainsString('INTERNAL-SECRET-100', $serialSheet);
+        $this->assertStringNotContainsString('CUSTOMER-DISPATCHED', $serialSheet);
+        $this->assertStringNotContainsString('OTHER-TENANT-SERIAL', $serialSheet);
+
+        $pdf = $this->actingAs($admin)->get('/inventory/current-stock/export?'.http_build_query([
+            'stock_date' => now()->toDateString(),
+            'format' => 'pdf',
+            'product_ids' => [$product->id],
+        ]));
+        $pdf->assertOk()->assertHeader('content-type', 'application/pdf');
+        $this->assertStringContainsString('CUSTOMER-SERIAL-100', $pdf->getContent());
+        $this->assertStringNotContainsString('INTERNAL-SECRET-100', $pdf->getContent());
+        $this->assertStringNotContainsString('CUSTOMER-DISPATCHED', $pdf->getContent());
     }
 
     public function test_operational_report_filters_are_exact_and_downloads_match_the_filtered_rows(): void
@@ -729,6 +880,8 @@ class AdminDataRestorationTest extends TestCase
         $this->actingAs($user)->get('/import')->assertForbidden();
         $this->actingAs($user)->get('/export')->assertForbidden();
         $this->actingAs($user)->get('/inventory/closing-stock/export?stock_date='.now()->toDateString().'&format=xlsx')
+            ->assertForbidden();
+        $this->actingAs($user)->get('/inventory/current-stock/export?stock_date='.now()->toDateString().'&format=xlsx')
             ->assertForbidden();
         $this->actingAs($user)->post('/admin/roles', ['name' => 'No Access'])
             ->assertForbidden();

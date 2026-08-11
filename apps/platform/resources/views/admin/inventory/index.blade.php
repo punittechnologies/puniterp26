@@ -17,6 +17,33 @@
     <section class="card">
         <div class="card-head">
             <div>
+                <h2>Current Stock Report</h2>
+                <p>Export only stock that is currently available, with product details, customer-facing serial numbers, kg and PCS. The inventory filters above are respected.</p>
+            </div>
+        </div>
+        <form method="GET" action="{{ route('admin.inventory.current-stock.export') }}" class="filter-bar">
+            <label>Stock date
+                <input type="date" name="stock_date" value="{{ now()->toDateString() }}" required>
+            </label>
+            @foreach(collect($filters)->except(['from', 'to', 'product_ids', 'detail_filters', 'transaction_type'])->filter(fn ($value) => filled($value)) as $filterKey => $filterValue)
+                <input type="hidden" name="{{ $filterKey }}" value="{{ $filterValue }}">
+            @endforeach
+            @foreach($filters['product_ids'] ?? [] as $productId)
+                <input type="hidden" name="product_ids[]" value="{{ $productId }}">
+            @endforeach
+            @foreach($filters['detail_filters'] ?? [] as $detailKey => $detailValues)
+                @foreach($detailValues as $detailValue)
+                    <input type="hidden" name="detail_filters[{{ $detailKey }}][]" value="{{ $detailValue }}">
+                @endforeach
+            @endforeach
+            <button class="btn primary" name="format" value="xlsx">Export Current Stock Excel</button>
+            <button class="btn" name="format" value="pdf">Export Current Stock PDF</button>
+        </form>
+    </section>
+
+    <section class="card">
+        <div class="card-head">
+            <div>
                 <h2>Closing Stock</h2>
                 <p>Download the stock position up to a selected date. Product filters above are respected.</p>
             </div>
