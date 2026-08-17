@@ -48,7 +48,7 @@ GitHub / ZIP / direct folder transfer
 Repository, if using GitHub:
 
 ```text
-https://github.com/punitdev26/puniterp
+https://github.com/punittechnologies/puniterp26
 ```
 
 Main branch:
@@ -163,11 +163,11 @@ MAIL_FROM_NAME="Punit ERP"
 
 ## 8. Live `.env` File
 
-Paste the complete live `.env` file below.
+Do not paste the live `.env` into this document, GitHub, a pull request, issue,
+commit, chat or task prompt. Transfer production configuration only through the
+owner's approved secret-sharing method and keep it on the production server.
 
-Do not commit this file to GitHub.
-
-Do not share it publicly.
+Never commit or share this file publicly.
 
 The `.env` file must be placed at:
 

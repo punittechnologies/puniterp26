@@ -1,491 +1,160 @@
 # Punit ERP Developer Handoff
 
-This document gives a developer the practical details needed to edit, test, and deploy the Punit ERP Laravel web panel and Flutter Android tablet/mobile app.
+This is the practical handoff for the production Laravel web/API and Flutter
+Android project. Read it together with `AGENTS.md`,
+`docs/PROTECTED_FEATURE_BASELINE.md`, and `docs/SYSTEM_FEATURE_CATALOG.md`.
 
-## 1. Source Code
-
-Repository:
-
-```text
-https://github.com/punitdev26/puniterp
-```
-
-Main branch:
+## Repository and project layout
 
 ```text
-main
+Repository: https://github.com/punittechnologies/puniterp26
+Production baseline: origin/main
+Laravel web/API: apps/platform
+Flutter Android: apps/tablet
+Shared rules and documentation: docs
+Regression guard: scripts/verify-protected-features.sh
 ```
 
-Clone:
+Do not use the legacy `punitdev26/puniterp` repository as the source of truth.
+Do not work directly on `main` and never force-push.
+
+## Required first steps for every task
 
 ```bash
-git clone https://github.com/punitdev26/puniterp.git
-cd puniterp
+git fetch origin --prune
+git status
+git branch --show-current
+git log -10 --oneline
+git switch -c feature/short-task-name origin/main
 ```
 
-## 2. Project Structure
+Then read all repository instructions, inspect the full existing workflow and
+tests, and write an impact map before editing. Paste the prompt from
+`docs/EMPLOYEE_CODEX_START_PROMPT.md` into every new Codex task.
 
-Laravel web panel:
+## Local web/API setup
 
-```text
-apps/platform
-```
-
-Flutter Android app:
-
-```text
-apps/tablet
-```
-
-Shared documentation:
-
-```text
-docs
-```
-
-Generated APK/output files are intentionally not committed.
-
-## 3. Laravel Web Panel
-
-Important Laravel folders:
-
-```text
-apps/platform/routes/web.php
-apps/platform/routes/api.php
-apps/platform/app/Http/Controllers
-apps/platform/app/Livewire
-apps/platform/app/Models
-apps/platform/app/Domain
-apps/platform/resources/views
-apps/platform/database/migrations
-apps/platform/database/seeders
-apps/platform/config
-```
-
-Primary web modules:
-
-```text
-Dashboard
-Products
-Product Details
-Label Templates
-Inward Report
-Dispatch Report / Packing List
-Production Entry
-Inventory
-Customers
-Dispatch Entry
-Sync Status
-Inventory Report
-Inventory Ledger
-Audit Report
-App Users
-Users
-Roles
-Report Customiser
-Audit Logs
-```
-
-## 4. Local Laravel Setup
-
-Requirements:
-
-```text
-PHP 8.4 compatible runtime
-Composer
-Node.js / npm
-MySQL or SQLite for local development
-```
-
-Commands:
+Requirements are PHP 8.4, Composer, Node.js 22/npm and SQLite or MySQL.
 
 ```bash
 cd apps/platform
 composer install
-npm install
+npm ci
 cp .env.example .env
+touch database/database.sqlite
 php artisan key:generate
 php artisan migrate --seed
 npm run build
 php artisan serve
 ```
 
-Local URL:
+Never copy production secrets into source control. Obtain required development
+values through the owner's approved secret-sharing method.
 
-```text
-http://127.0.0.1:8000
-```
+## Local Flutter setup
 
-## 5. Laravel Environment Variables
-
-Do not commit `.env`.
-
-Live production URL:
-
-```text
-APP_URL=https://erp.puniterp.com
-ASSET_URL=https://erp.puniterp.com
-APP_ENV=production
-APP_DEBUG=false
-```
-
-Database keys required in `.env`:
-
-```text
-DB_CONNECTION=mysql
-DB_HOST=
-DB_PORT=3306
-DB_DATABASE=
-DB_USERNAME=
-DB_PASSWORD=
-```
-
-Mail keys required in `.env`:
-
-```text
-MAIL_MAILER=smtp
-MAIL_HOST=
-MAIL_PORT=
-MAIL_USERNAME=
-MAIL_PASSWORD=
-MAIL_ENCRYPTION=
-MAIL_FROM_ADDRESS=punitinstrument@gmail.com
-MAIL_FROM_NAME="Punit ERP"
-```
-
-Recommended production settings:
-
-```text
-SESSION_DRIVER=file
-CACHE_STORE=file
-QUEUE_CONNECTION=sync
-FILESYSTEM_DISK=local
-SANCTUM_STATEFUL_DOMAINS=erp.puniterp.com
-```
-
-Actual production secrets must be copied from the live server `.env` or Hostinger panel. Do not send them through normal chat.
-
-## 6. Live Server Details
-
-Domain:
-
-```text
-https://erp.puniterp.com
-```
-
-Hostinger SSH:
-
-```text
-Host/IP: 93.127.168.78
-Port: 65002
-User: u407989482
-```
-
-Laravel app directory:
-
-```text
-/home/u407989482/domains/erp.puniterp.com/punit_erp_app
-```
-
-Public document root:
-
-```text
-/home/u407989482/domains/erp.puniterp.com/public_html
-```
-
-Production PHP binary:
-
-```text
-/opt/alt/php84/usr/bin/php
-```
-
-Read live `.env` on server:
-
-```bash
-ssh -p 65002 u407989482@93.127.168.78
-cd /home/u407989482/domains/erp.puniterp.com/punit_erp_app
-cat .env
-```
-
-Keep `.env` private.
-
-## 7. Deployment Process
-
-Before deployment:
-
-```bash
-cd apps/platform
-composer install
-npm install
-npm run build
-php artisan test
-```
-
-On the live server after pulling/uploading new Laravel code:
-
-```bash
-cd /home/u407989482/domains/erp.puniterp.com/punit_erp_app
-/opt/alt/php84/usr/bin/php artisan migrate --force
-/opt/alt/php84/usr/bin/php artisan optimize:clear
-/opt/alt/php84/usr/bin/php artisan config:cache
-/opt/alt/php84/usr/bin/php artisan view:cache
-/opt/alt/php84/usr/bin/php artisan route:cache
-```
-
-If using the included deployment script, review it first:
-
-```text
-deploy_erp_remote.sh
-```
-
-The script expects a release tarball at:
-
-```text
-/home/u407989482/punit_erp_platform_release.tar.gz
-```
-
-and deploys to:
-
-```text
-/home/u407989482/domains/erp.puniterp.com/punit_erp_app
-```
-
-## 8. Laravel Tests and Formatting
-
-Run:
-
-```bash
-cd apps/platform
-php artisan test
-./vendor/bin/pint
-npm run build
-```
-
-## 9. Flutter App
-
-Flutter app path:
-
-```text
-apps/tablet
-```
-
-Important Flutter folders:
-
-```text
-apps/tablet/lib/core
-apps/tablet/lib/features/weighing
-apps/tablet/lib/features/labels
-apps/tablet/lib/features/dispatch
-apps/tablet/lib/features/inventory
-apps/tablet/lib/features/products
-apps/tablet/lib/features/reports
-apps/tablet/lib/services/devices
-apps/tablet/android
-```
-
-The app includes:
-
-```text
-Bluetooth weighing scale connection
-Printer connection and TSPL/native label printing support
-Product sync
-Label-template sync
-Inward production transactions
-Dispatch scanning
-Inventory view
-Reports
-Offline fallback
-```
-
-## 10. Flutter Setup
-
-Requirements:
-
-```text
-Flutter stable
-Android Studio / Android SDK
-Android device or emulator
-```
-
-Commands:
+Use the Flutter version pinned by CI, a Java 17 runtime and Android SDK.
 
 ```bash
 cd apps/tablet
 flutter pub get
 flutter analyze
 flutter test
-flutter build apk --debug
 ```
 
-Generated APK:
+The installable editions and signed Web Label release process are documented in
+`apps/tablet/README.md`. Never replace a production signing key with a new key.
+
+## Application map
+
+The complete protected feature map is in `docs/SYSTEM_FEATURE_CATALOG.md`.
+Important implementation areas are:
 
 ```text
-apps/tablet/build/app/outputs/flutter-apk/app-debug.apk
+apps/platform/routes
+apps/platform/app/Http/Controllers
+apps/platform/app/Livewire
+apps/platform/app/Domain
+apps/platform/app/Models
+apps/platform/resources/views
+apps/platform/resources/css
+apps/platform/database/migrations
+apps/platform/tests
+apps/tablet/lib/features
+apps/tablet/lib/services/devices
+apps/tablet/test
 ```
 
-## 11. Flutter Live API Connection
+Inspect both the producer and every consumer of a field before changing it.
+Laravel API changes can affect already-installed APKs even when Flutter code is
+not edited.
 
-Production API base URL:
+## Required validation
 
-```text
-https://erp.puniterp.com/api/v1
-```
-
-The app user should be created from the Laravel web panel:
-
-```text
-App Users
-```
-
-Then login in the Android app using that app-user email/username and password.
-
-## 12. App User and Web User Separation
-
-Web users:
-
-```text
-Laravel admin panel login
-Used by admins/superadmins on web
-```
-
-App users:
-
-```text
-Created from web panel under App Users
-Used only in Android app
-Synced by tenant/user permissions
-```
-
-Do not use superadmin credentials inside the app.
-
-## 13. Label Template Storage
-
-Label templates are stored in Laravel database tables:
-
-```text
-label_templates
-label_template_versions
-label_template_elements
-```
-
-The Flutter app syncs templates through the Laravel API.
-
-Expected behavior:
-
-```text
-Template saved on one device -> uploaded to web server
-Login on another device with same tenant/app user -> sync downloads template
-Selecting template -> size, fields, layout, logo, barcode, and preview should restore
-```
-
-If a device shows stale templates:
-
-```text
-Logout should clear account-scoped local template cache.
-Login should force template sync from server.
-Local templates must be tenant/user scoped.
-```
-
-## 14. Production and Dispatch Sync
-
-Expected cloud-first behavior:
-
-```text
-Inward/weighing transaction saved -> immediate API sync -> web inward report visible
-Dispatch scan/save -> immediate API sync -> web dispatch report visible
-If internet fails -> store locally and retry later
-```
-
-Important APIs:
-
-```text
-/api/v1/auth/login
-/api/v1/sync/products
-/api/v1/label-templates
-/api/v1/sync/production
-/api/v1/sync/inward-sessions
-/api/v1/sync/dispatches
-/api/v1/inventory
-/api/v1/reports
-```
-
-## 15. Database Notes
-
-Use MySQL for production scale.
-
-Recommended:
-
-```text
-InnoDB
-tenant_id indexes
-created_at indexes
-barcode indexes
-idempotency key indexes
-inventory transaction indexes
-dispatch item indexes
-production transaction indexes
-```
-
-SQLite should only be used for local/simple testing, not high-volume production.
-
-## 16. High-Volume Rules
-
-For thousands of users and high daily entries:
-
-```text
-Do not run unbounded report queries.
-Paginate all tables.
-Use indexed filters.
-Keep transaction writes idempotent.
-Use tenant-scoped queries everywhere.
-Keep app sync payloads incremental.
-Archive old transactions if database grows heavily.
-Keep report export filters required for large ranges.
-```
-
-## 17. What Developers Should Not Do
-
-Do not commit:
-
-```text
-.env
-database.sqlite
-APKs
-node_modules
-vendor
-storage/logs
-Android local.properties
-```
-
-Do not edit production directly without backup.
-
-Do not change live database schema manually unless migration is impossible.
-
-Do not expose app keys, database passwords, SMTP passwords, or GitHub tokens in chat.
-
-## 18. Recommended Workflow
+For every task:
 
 ```bash
-git pull
-create a feature branch
-edit locally
-run tests
-commit
-push
-deploy to live
-verify web panel
-verify Android app sync
+bash scripts/verify-protected-features.sh
 ```
 
-Example:
+For Laravel/web changes:
 
 ```bash
-git checkout -b fix-label-template-sync
-# edit files
-cd apps/platform && php artisan test
-cd ../tablet && flutter test
-git add .
-git commit -m "Fix label template sync"
-git push origin fix-label-template-sync
+cd apps/platform
+./vendor/bin/pint --dirty
+php artisan test
+npm run build
+php artisan view:cache
+php artisan view:clear
 ```
 
+For Flutter/Android changes:
+
+```bash
+cd apps/tablet
+dart format --output=none --set-exit-if-changed lib test
+flutter analyze
+flutter test
+```
+
+Review `git diff --stat`, `git diff`, and `git status` before committing. Do not
+commit generated files or unrelated local changes.
+
+## Pull request handoff
+
+The pull request must contain:
+
+1. Exact requested behavior and acceptance criteria.
+2. Impact map for web, API, database, Android, printers/scales, reports and
+   tenant isolation.
+3. Existing workflows inspected and preserved.
+4. Files changed and why each file changed.
+5. Tests/build commands and results.
+6. Migration, compatibility, deployment and rollback notes.
+7. Screenshots or device evidence when UI/hardware behavior changes.
+
+Owner approval to develop is not approval to deploy. Deployment is a separate
+explicit action.
+
+## Production deployment boundary
+
+Production domain, SSH details, `.env`, database credentials and signing
+credentials are intentionally not documented in Git. Obtain them directly from
+the owner when deployment is approved.
+
+Before deploying, make a recoverable backup of affected files/data and record
+the current production commit. Deploy the reviewed commit only. Typical Laravel
+post-deployment commands are:
+
+```bash
+composer install --no-dev --optimize-autoloader
+php artisan migrate --force
+php artisan optimize:clear
+php artisan config:cache
+php artisan view:cache
+php artisan route:cache
+```
+
+Verify `/up`, login, the changed workflow and one nearby protected workflow.
+Rollback by restoring the recorded application release and applying the
+documented migration rollback only when it is safe for production data.
