@@ -34,8 +34,15 @@ Existing behavior is protected. Changes must be additive or narrowly scoped.
   switching.
 
 Read `docs/PROTECTED_FEATURE_BASELINE.md` before changing application behavior.
+Also read `docs/SYSTEM_FEATURE_CATALOG.md` for the complete web, API, Android,
+printing, reporting, security, and deployment map.
 If the requested change conflicts with that baseline, stop and explain the
 conflict before editing.
+
+A task prompt authorizes only the feature named in that task. It does not
+authorize collateral changes. If completing a task appears to require removing,
+replacing, or changing an unrelated protected workflow, stop and obtain an
+explicit owner decision before proceeding.
 
 Employees should start new Codex work with the prompt in
 `docs/EMPLOYEE_CODEX_START_PROMPT.md`.
@@ -52,12 +59,16 @@ commit.
 1. Fetch `origin` and start from the latest `origin/main`.
 2. Create a task branch. Do not develop directly on `main`.
 3. Write down the exact files and existing workflows that may be affected.
+   Include direct consumers (web, API, classic APK, Web Label APK, database,
+   reports, imports/exports, and deployment) and mark each as changed or
+   explicitly unchanged.
 4. Make the smallest change that satisfies the request.
 5. Add or update regression tests for both the new behavior and preserved old
    behavior.
 6. Run `scripts/verify-protected-features.sh`.
 7. Run the applicable web and Flutter checks below.
 8. Review `git diff` for accidental deletions and unrelated changes.
+   A large rewrite is not acceptable when a narrow patch can satisfy the task.
 9. Open a pull request using the repository template.
 10. Merge or deploy only after owner approval. Never force-push.
 

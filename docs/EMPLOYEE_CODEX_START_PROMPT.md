@@ -6,11 +6,17 @@ specific requested change:
 ```text
 Work from the latest origin/main in the punittechnologies/puniterp26
 repository. Read the complete AGENTS.md and
-docs/PROTECTED_FEATURE_BASELINE.md before making changes.
+docs/PROTECTED_FEATURE_BASELINE.md and docs/SYSTEM_FEATURE_CATALOG.md before
+making changes.
 
 First inspect git status, current branch, recent commits, relevant source,
 existing tests, routes, and the complete existing workflow being changed.
 Create a new task branch; do not work directly on main.
+
+Before editing, provide an impact map listing every web page, API endpoint,
+database table/JSON field, Flutter screen, printer/scale workflow, report,
+import/export path, permission and tenant boundary that could be affected.
+Mark each item as intended to change or required to remain unchanged.
 
 Preserve every existing feature. Do not remove, rename, hide, replace, or
 simplify any existing menu, page, route, field, filter, report, import/export
@@ -23,6 +29,11 @@ behavior and the existing behavior that must remain. Run
 scripts/verify-protected-features.sh and all relevant web/Flutter tests and
 build checks. Review the complete git diff for accidental deletions.
 
+The specific task authorizes only that task. It does not authorize cleanup,
+redesign, renaming, dependency replacement, schema removal, route removal,
+API response changes, or refactoring of nearby working modules. If the task
+cannot be completed without one of those actions, stop and ask the owner.
+
 Do not deploy, merge to main, push directly to main, modify production data, or
 use production credentials. Commit only to the task branch and give me the
 branch name, commit, tests, affected files, risks, and exact deployment plan
@@ -34,6 +45,12 @@ the conflict to me instead.
 
 Specific task:
 [WRITE THE REQUEST HERE]
+
+Acceptance criteria:
+[WRITE THE EXACT EXPECTED RESULT HERE]
+
+Existing workflows that must be regression-tested:
+[LIST THE NEARBY WORKFLOWS HERE]
 ```
 
 ## Owner review

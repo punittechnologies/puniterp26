@@ -6,6 +6,10 @@ platform_root="$repo_root/apps/platform"
 tablet_root="$repo_root/apps/tablet"
 
 required_files=(
+  "$repo_root/AGENTS.md"
+  "$repo_root/docs/PROTECTED_FEATURE_BASELINE.md"
+  "$repo_root/docs/SYSTEM_FEATURE_CATALOG.md"
+  "$repo_root/docs/EMPLOYEE_CODEX_START_PROMPT.md"
   "$platform_root/routes/web.php"
   "$platform_root/routes/api.php"
   "$platform_root/app/Livewire/Labels/LabelDesigner.php"
@@ -60,11 +64,13 @@ $required = [
     'inventory/adjust',
     'inventory/clear',
     'inventory/closing-stock/export',
+    'inventory/current-stock/export',
     'inward-report',
     'inward/{session}/export/{format}',
     'labels/{template?}',
     'login',
     'logout',
+    'downloads/latest',
     'onboarding',
     'product-details',
     'production',
@@ -155,6 +161,10 @@ required_markers=(
   "apps/platform/resources/views/admin/imports/index.blade.php:::Product Details Spreadsheet Import"
   "apps/platform/resources/views/admin/imports/index.blade.php:::Export Current Products"
   "apps/platform/resources/views/admin/inventory/index.blade.php:::Inventory Filters"
+  "apps/platform/resources/views/admin/inventory/index.blade.php:::Current Stock Report"
+  "apps/platform/resources/views/admin/inventory/index.blade.php:::Closing Stock"
+  "apps/platform/resources/views/admin/inventory/index.blade.php:::Manual Adjustment"
+  "apps/platform/resources/views/admin/inventory/index.blade.php:::Clear Inventory Data"
   "apps/platform/resources/views/admin/inventory/index.blade.php:::Product-wise Inventory"
   "apps/platform/resources/views/admin/inventory/index.blade.php:::Product Detail-wise Inventory"
   "apps/platform/resources/views/admin/reports/index.blade.php:::Inventory Ledger"
