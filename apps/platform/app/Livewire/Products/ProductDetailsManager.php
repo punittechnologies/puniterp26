@@ -70,31 +70,34 @@ class ProductDetailsManager extends Component
     public function addOption(string $fieldId): void
     {
         $field = $this->field($fieldId);
-        $value = trim((string) ($this->optionInputs[$fieldId] ?? ''));
+        $input = trim((string) ($this->optionInputs[$fieldId] ?? ''));
 
-        if ($value === '') {
+        if ($input === '') {
             return;
         }
 
-        if ($field->use_as_weight_divisor && ! $this->isPositiveQuantity($value)) {
-            $this->addError('optionInputs.'.$fieldId, 'Enter a positive quantity for divided weight.');
+        $newOptions = $this->optionsFromText($input);
+
+        if ($field->use_as_weight_divisor && ! $this->optionsArePositiveQuantities($newOptions)) {
+            $this->addError('optionInputs.'.$fieldId, 'Every divided-weight value must be a positive quantity.');
 
             return;
         }
 
-        $options = collect($field->dropdown_options ?? []);
-        $optionValue = Str::of($value)->slug('_')->toString();
-
-        if (! $options->contains(fn ($option) => ($option['value'] ?? null) === $optionValue)) {
-            $options->push(['label' => $value, 'value' => $optionValue]);
-        }
+        $options = collect($field->dropdown_options ?? [])
+            ->merge($newOptions)
+            ->unique(fn ($option) => $option['value'] ?? '')
+            ->values()
+            ->all();
 
         $field->update([
-            'dropdown_options' => $options->values()->all(),
+            'dropdown_options' => $options,
             'updated_by' => Auth::id(),
         ]);
 
         $this->optionInputs[$fieldId] = '';
+        $this->resetErrorBag('optionInputs.'.$fieldId);
+        session()->flash('status', count($newOptions) === 1 ? 'Product detail value added.' : count($newOptions).' product detail values added.');
     }
 
     public function removeOption(string $fieldId, string $optionValue): void

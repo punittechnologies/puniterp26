@@ -15,6 +15,7 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
         previewProducts: Array.isArray(previewProducts) ? previewProducts : [],
         previewProductId: Array.isArray(previewProducts) && previewProducts.length ? previewProducts[0].id : '',
         styleClipboard: null,
+        toolSearch: '',
         scale: 4,
         size: '75x75',
         warnings: [],
@@ -428,12 +429,27 @@ window.labelDesigner = function labelDesigner(templateJsonText, widthMm, heightM
             this.commit(true);
         },
         zoomIn() {
-            this.scale += 1;
+            this.scale = Math.min(8, this.scale + 1);
             this.render();
         },
         zoomOut() {
             this.scale = Math.max(2, this.scale - 1);
             this.render();
+        },
+        resetZoom() {
+            this.scale = 4;
+            this.render();
+        },
+        zoomLabel() {
+            return `${Math.round((this.scale / 4) * 100)}%`;
+        },
+        toolMatches(label) {
+            const search = String(this.toolSearch || '').trim().toLowerCase();
+
+            return search === '' || String(label || '').toLowerCase().includes(search);
+        },
+        matchingProductDetailCount(labels) {
+            return (Array.isArray(labels) ? labels : []).filter((label) => this.toolMatches(label)).length;
         },
         setSize() {
             this.remember();

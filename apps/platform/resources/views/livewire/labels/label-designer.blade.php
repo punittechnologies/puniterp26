@@ -24,6 +24,28 @@
         <div class="label-studio-status">{{ $statusMessage }}</div>
     @endif
 
+    <section class="label-studio-overview" aria-label="Label design workflow">
+        <div>
+            <span>1</span>
+            <strong>Add content</strong>
+            <small>Choose product, weight, barcode, QR, text, or image fields.</small>
+        </div>
+        <div>
+            <span>2</span>
+            <strong>Arrange precisely</strong>
+            <small>Drag, resize, align, and preview using real product values.</small>
+        </div>
+        <div>
+            <span>3</span>
+            <strong>Check and save</strong>
+            <small>Resolve visible warnings, then save the reusable template.</small>
+        </div>
+        <div class="label-studio-overview__status">
+            <strong x-text="`${templateJson.elements?.length || 0} objects`"></strong>
+            <small x-text="warnings.length ? `${warnings.length} checks need attention` : 'Ready for final review'"></small>
+        </div>
+    </section>
+
     <section class="label-template-strip">
         <div class="label-template-strip__header">
             <div>
@@ -125,6 +147,16 @@
 
             <div class="label-tool-section">
                 <h4>Product Details</h4>
+                @php
+                    $productDetailLabels = collect($bindings)
+                        ->filter(fn ($binding) => str($binding['key'])->startsWith(['dynamic.product.', 'dynamic.product_variant.']))
+                        ->pluck('label')
+                        ->values();
+                @endphp
+                <label class="label-tool-search">
+                    <span>Find a product detail</span>
+                    <input type="search" x-model.debounce.150ms="toolSearch" placeholder="Search fields...">
+                </label>
                 <div class="label-tool-group label-tool-group--scroll">
                     @foreach ($bindings as $binding)
                         @php
@@ -132,11 +164,12 @@
                             $isProductDetail = str($key)->startsWith('dynamic.product.') || str($key)->startsWith('dynamic.product_variant.');
                         @endphp
                         @continue(! $isProductDetail)
-                        <button type="button" x-on:click="addBinding(@js($key), @js($binding['label']))">
+                        <button type="button" x-show="toolMatches(@js($binding['label']))" x-on:click="addBinding(@js($key), @js($binding['label']))">
                             {{ $binding['label'] }}
                         </button>
                     @endforeach
                 </div>
+                <small x-show="toolSearch && !matchingProductDetailCount(@js($productDetailLabels))">No matching product-detail field.</small>
             </div>
 
             <div class="label-tool-section">
@@ -191,7 +224,10 @@
                     <button type="button" x-on:click="redo()" x-bind:disabled="!future.length">Redo</button>
                     <button type="button" x-on:click="zoomOut()">Zoom -</button>
                     <button type="button" x-on:click="zoomIn()">Zoom +</button>
-                    <button type="button" x-on:click="duplicate()">Duplicate</button>
+                    <button type="button" x-on:click="resetZoom()">Fit 100%</button>
+                    <span class="label-zoom-value" x-text="zoomLabel()"></span>
+                    <button type="button" x-on:click="duplicate()" x-bind:disabled="!selectedElement">Duplicate</button>
+                    <button type="button" class="is-danger" x-on:click="remove()" x-bind:disabled="!selectedElement">Delete</button>
                 </div>
             </div>
             <div class="label-preview-data-bar">
@@ -208,7 +244,13 @@
                     <span>Positions snap to 0.125 mm (one printer dot). Choose “Longest values” to test the safest layout.</span>
                 </div>
             </div>
-            <p class="label-canvas-help">Drag any field precisely. Side handles change its area; corner handles resize the object and proportionally change text size. Arrow keys move one printer dot.</p>
+            <div class="label-canvas-help label-canvas-help--shortcuts">
+                <span><kbd>Drag</kbd> move</span>
+                <span><kbd>Arrow</kbd> 1 printer dot</span>
+                <span><kbd>Shift</kbd> + arrow 1 mm</span>
+                <span><kbd>Ctrl</kbd> + Z undo</span>
+                <span><kbd>Delete</kbd> remove selected</span>
+            </div>
             <div class="label-canvas-wrap">
                 <div id="label-stage" wire:ignore></div>
             </div>
@@ -216,6 +258,10 @@
                 <template x-for="(warning, warningIndex) in warnings" :key="warning.type + (warning.element || '') + warningIndex">
                     <span x-text="warningMessage(warning)"></span>
                 </template>
+            </div>
+            <div class="label-ready-row" x-show="!warnings.length">
+                <strong>Canvas check passed</strong>
+                <span>No size, overlap, barcode, QR, or text-fit warnings are currently detected.</span>
             </div>
         </main>
 
