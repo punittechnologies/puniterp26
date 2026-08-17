@@ -42,7 +42,7 @@ class ProductDetailAndUserUiTest extends TestCase
         );
     }
 
-    public function test_user_edit_shows_a_typed_password_toggle_without_exposing_the_saved_password(): void
+    public function test_user_edit_keeps_password_fields_secure_without_exposing_the_saved_password(): void
     {
         [$tenant, $admin] = $this->tenantUser();
         $operator = User::query()->create([
@@ -58,8 +58,9 @@ class ProductDetailAndUserUiTest extends TestCase
         $this->actingAs($admin)
             ->get('/app-users?edit='.$operator->id)
             ->assertOk()
-            ->assertSee('Show typed password')
             ->assertSee('the saved password cannot be viewed')
+            ->assertDontSee('Show typed password')
+            ->assertDontSee('Hide typed password')
             ->assertDontSee('secret12');
     }
 
