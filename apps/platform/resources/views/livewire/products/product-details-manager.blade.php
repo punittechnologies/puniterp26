@@ -36,9 +36,13 @@
                     <button class="icon-btn danger" wire:click="deleteField('{{ $field->id }}')" wire:confirm="Remove this field?" title="Delete field" type="button">×</button>
                 </div>
 
-                <div class="attribute-row">
-                    <input wire:key="detail-field-option-input-{{ $field->id }}" wire:model="optionInputs.{{ $field->id }}" wire:keydown.enter.prevent="addOption('{{ $field->id }}')" placeholder="Add option">
-                    <button class="icon-btn add" wire:click="addOption('{{ $field->id }}')" title="Add option" type="button">+</button>
+                <div class="attribute-row attribute-option-entry">
+                    <label>
+                        <span>Add one or multiple values</span>
+                        <textarea wire:key="detail-field-option-input-{{ $field->id }}" wire:model="optionInputs.{{ $field->id }}" wire:keydown.ctrl.enter.prevent="addOption('{{ $field->id }}')" rows="2" placeholder="Example: Red, Blue, Green&#10;or enter one value per line"></textarea>
+                        <small>Separate values with commas or new lines. Press Ctrl+Enter or use + to add all values.</small>
+                    </label>
+                    <button class="icon-btn add" wire:click="addOption('{{ $field->id }}')" title="Add all values" type="button">+</button>
                 </div>
 
                 <div class="option-chips">
