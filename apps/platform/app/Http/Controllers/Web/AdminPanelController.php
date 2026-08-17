@@ -599,7 +599,7 @@ class AdminPanelController extends Controller
             'rows' => $query->paginate(25)->withQueryString(),
             'filters' => ['from' => $from->toDateString(), 'to' => $to->toDateString(), 'search' => $request->search, 'status' => $request->status],
             'products' => Product::query()->where('tenant_id', $tenantId)->where('is_active', true)->orderBy('name')->get(),
-            'variants' => ProductVariant::query()->where('tenant_id', $tenantId)->where('is_active', true)->orderBy('name')->get(),
+            'productNames' => Product::query()->where('tenant_id', $tenantId)->pluck('name', 'id'),
             'productDetailFields' => DynamicFieldDefinition::query()
                 ->where('tenant_id', $tenantId)
                 ->where('entity_type', 'product_variant')

@@ -18,14 +18,6 @@
                 @endforeach
             </select>
         </label>
-        <label>Variant
-            <select name="variant_id">
-                <option value="">No variant</option>
-                @foreach ($variants as $variant)
-                    <option value="{{ $variant->id }}">{{ $variant->name }} - {{ $variant->variant_code }}</option>
-                @endforeach
-            </select>
-        </label>
         <label>Gross weight <input name="gross_weight" inputmode="decimal" required></label>
         <label>Tare weight <input name="tare_weight" inputmode="decimal" placeholder="Uses product tare if blank"></label>
         <label>Pieces <input name="piece_quantity" inputmode="decimal" placeholder="Optional"></label>
@@ -56,14 +48,24 @@
                         <tr>
                             <td>{{ $row->label_serial_number ?? $row->serial_number }}</td>
                             <td><code>{{ $row->barcode_value }}</code></td>
-                            <td>{{ $row->product_snapshot['name'] ?? $row->product_id }}</td>
+                            <td>{{ $row->product_snapshot['name'] ?? $productNames[$row->product_id] ?? 'Unknown product' }}</td>
                             <td>{{ $row->gross_weight }}</td>
                             <td>{{ $row->tare_weight }}</td>
                             <td><strong>{{ $row->net_weight }}</strong></td>
                             <td>{{ $row->piece_quantity ?? '-' }}</td>
                             <td><span class="status-pill">{{ $row->status }}</span></td>
                             <td>{{ $row->captured_at?->format('d M Y H:i') }}</td>
-                            <td><a class="btn small" href="{{ route('admin.production.show', $row) }}">View</a></td>
+                            <td>
+                                @if ($row->status === 'cancelled')
+                                    <button class="btn small" disabled>Cancelled</button>
+                                @else
+                                    <form method="POST" action="{{ route('admin.production.cancel', $row) }}" onsubmit="return confirm('Cancel this production transaction and reverse inventory?')">
+                                        @csrf
+                                        <input type="hidden" name="reason" value="Cancelled from production transactions list.">
+                                        <button class="btn small destructive">Cancel</button>
+                                    </form>
+                                @endif
+                            </td>
                         </tr>
                     @empty
                         <tr><td colspan="10" class="empty">No production records found.</td></tr>

@@ -22,6 +22,7 @@ class AdminOperationalPagesTest extends TestCase
         [$tenant, $admin] = $this->adminUser();
         $productId = (string) Str::uuid();
         $productionId = (string) Str::uuid();
+        $cancelProductionId = (string) Str::uuid();
         $dispatchId = (string) Str::uuid();
         $dispatchItemId = (string) Str::uuid();
         $customer = Customer::query()->create([
@@ -53,12 +54,32 @@ class AdminOperationalPagesTest extends TestCase
             'product_id' => $productId,
             'serial_number' => 'LEGACY-SR-1',
             'barcode_value' => 'LEGACY-BC-1',
-            'product_snapshot' => json_encode(['name' => 'Legacy Product']),
+            'product_snapshot' => json_encode([]),
             'dynamic_values' => json_encode([]),
             'gross_weight' => '',
             'tare_weight' => '',
             'net_weight' => '',
             'piece_quantity' => '',
+            'unit' => 'kg',
+            'status' => 'active',
+            'sync_status' => 'synced',
+            'captured_at' => $now,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        DB::table('production_transactions')->insert([
+            'id' => $cancelProductionId,
+            'tenant_id' => $tenant->id,
+            'product_id' => $productId,
+            'serial_number' => 'CANCEL-SR-1',
+            'barcode_value' => 'CANCEL-BC-1',
+            'product_snapshot' => json_encode(['name' => 'Legacy Product']),
+            'dynamic_values' => json_encode([]),
+            'gross_weight' => 12,
+            'tare_weight' => 2,
+            'net_weight' => 10,
+            'piece_quantity' => 1,
             'unit' => 'kg',
             'status' => 'active',
             'sync_status' => 'synced',
@@ -94,8 +115,31 @@ class AdminOperationalPagesTest extends TestCase
         ]);
 
         $this->actingAs($admin)->get('/app-users')->assertOk();
-        $this->actingAs($admin)->get('/production')->assertOk()->assertSee('Production');
+        $this->actingAs($admin)->get('/production')
+            ->assertOk()
+            ->assertSee('Production')
+            ->assertSee('<td>Legacy Product</td>', false)
+            ->assertDontSee('<td>'.$productId.'</td>', false)
+            ->assertDontSee('<label>Variant', false)
+            ->assertDontSee('>View</a>', false)
+            ->assertSee('/production/'.$productionId.'/cancel', false)
+            ->assertSee('>Cancel</button>', false)
+            ->assertDontSee('Other Reports');
+        $this->actingAs($admin)->post('/production/'.$cancelProductionId.'/cancel', [
+            'reason' => 'Cancelled from production transactions list.',
+        ])->assertRedirect();
+        $this->assertDatabaseHas('production_transactions', [
+            'id' => $cancelProductionId,
+            'status' => 'cancelled',
+        ]);
+        $this->assertDatabaseHas('inventory_transactions', [
+            'reference_id' => $cancelProductionId,
+            'transaction_type' => 'production_cancellation',
+        ]);
         $this->actingAs($admin)->get('/dispatch')->assertOk()->assertSee('Dispatch');
+        $this->actingAs($admin)->get('/reports/inventory')->assertOk()->assertSee('Inventory Report');
+        $this->actingAs($admin)->get('/reports/inventory-ledger')->assertOk();
+        $this->actingAs($admin)->get('/reports/audit')->assertOk();
     }
 
     public function test_admin_can_edit_an_app_user_without_resetting_an_unchanged_password(): void
