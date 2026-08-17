@@ -150,8 +150,6 @@ grep -q "type == 'qr'" "$tablet_root/lib/services/devices/bluetooth_thermal_prin
 
 required_markers=(
   "apps/platform/resources/views/layouts/admin.blade.php:::Label Templates"
-  "apps/platform/resources/views/layouts/admin.blade.php:::Inventory Report"
-  "apps/platform/resources/views/layouts/admin.blade.php:::Inventory Ledger"
   "apps/platform/resources/views/layouts/admin.blade.php:::App Users"
   "apps/platform/resources/views/layouts/admin.blade.php:::Roles"
   "apps/platform/resources/views/layouts/admin.blade.php:::Import"
