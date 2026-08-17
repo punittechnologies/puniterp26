@@ -41,25 +41,24 @@
                     <input type="email" name="email" value="{{ old('email', $editing?->email) }}" placeholder="operator@company.com" required>
                 </label>
                 @if ($editing)
-                    <div class="password-edit-panel full" x-data="{ revealPassword: false }">
+                    <div class="password-edit-panel full">
                         <div class="password-edit-heading">
                             <div>
                                 <strong>Change password</strong>
                                 <small>Leave both fields blank to keep the current password.</small>
                             </div>
-                            <button type="button" class="password-visibility-button" x-on:click="revealPassword = ! revealPassword" x-text="revealPassword ? 'Hide typed password' : 'Show typed password'"></button>
                         </div>
                         <div class="password-edit-grid">
                             <label>
                                 New password
-                                <input x-bind:type="revealPassword ? 'text' : 'password'" name="password" autocomplete="new-password">
+                                <input type="password" name="password" autocomplete="new-password">
                             </label>
                             <label>
                                 Confirm new password
-                                <input x-bind:type="revealPassword ? 'text' : 'password'" name="password_confirmation" autocomplete="new-password">
+                                <input type="password" name="password_confirmation" autocomplete="new-password">
                             </label>
                         </div>
-                        <small class="password-security-note">For security, the saved password cannot be viewed. This button only reveals the new password you type during this edit.</small>
+                        <small class="password-security-note">For security, the saved password cannot be viewed. Enter a replacement only when you want to change it.</small>
                     </div>
                 @else
                     <label>
