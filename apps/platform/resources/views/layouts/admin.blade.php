@@ -18,11 +18,6 @@
             ['Dispatch Entry', route('admin.dispatch'), 'dispatch.confirm'],
             ['Sync Status', route('admin.sync'), 'devices.configure'],
         ],
-        'Other Reports' => [
-            ['Inventory Report', route('admin.reports', 'inventory'), 'reports.view'],
-            ['Inventory Ledger', route('admin.reports', 'inventory-ledger'), 'reports.view'],
-            ['Audit Report', route('admin.reports', 'audit'), 'reports.view'],
-        ],
         'Administration' => [
             ['Superadmin Onboarding', route('admin.superadmin.onboarding'), 'superadmin.only'],
             ['Company Admins', route('admin.superadmin.admins'), 'superadmin.only'],
